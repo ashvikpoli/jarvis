@@ -9,3 +9,4 @@ build/
 data/
 config/local.toml
 .env
+.sync/
