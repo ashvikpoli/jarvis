@@ -193,26 +193,36 @@ class AppCatalog:
     # -------------------------------------------------------------- matching
 
     def find(self, query: str) -> InstalledApp | None:
+        return self.lookup(query)[0]
+
+    def lookup(self, query: str) -> tuple[InstalledApp | None, bool]:
+        """Return (app, exact). exact=False means a typo-tolerant guess."""
         q = normalize(query)
         if not q:
-            return None
+            return None, False
         if q in BUILTIN_APPS:
-            return InstalledApp(query.strip(), BUILTIN_APPS[q], "builtin")
-        apps = self.apps()
-        by_norm = {}
-        for a in apps:
+            return InstalledApp(query.strip(), BUILTIN_APPS[q], "builtin"), True
+        by_norm: dict[str, InstalledApp] = {}
+        for a in self.apps():
             by_norm.setdefault(normalize(a.name), a)
         if q in by_norm:
-            return by_norm[q]
-        # whole-word match: "teams" → "Microsoft Teams", "vs code" handled by fuzzy
+            return by_norm[q], True
+        # whole word inside a longer name: "teams" → "Microsoft Teams"
         word_hits = [a for n, a in by_norm.items() if re.search(rf"\b{re.escape(q)}\b", n)]
         if word_hits:
-            return min(word_hits, key=lambda a: len(a.name))
-        close = difflib.get_close_matches(q, list(by_norm), n=1, cutoff=0.75)
+            return min(word_hits, key=lambda a: len(a.name)), True
+        # typos: similar spelling AND similar length. Length matters — without it
+        # "photoshop" matched "photos" (6 shared letters) and opened the wrong app.
+        slack = max(2, len(q) // 5)
+        similar = [n for n in by_norm if abs(len(n) - len(q)) <= slack]
+        close = difflib.get_close_matches(q, similar, n=1, cutoff=0.8)
         if close:
-            return by_norm[close[0]]
+            return by_norm[close[0]], False
+        # the query is part of a longer name: "visual studio" → "Visual Studio Code"
         partial = [a for n, a in by_norm.items() if q in n]
-        return min(partial, key=lambda a: len(a.name)) if partial else None
+        if partial:
+            return min(partial, key=lambda a: len(a.name)), True
+        return None, False
 
     def find_for_site(self, url: str) -> InstalledApp | None:
         """The installed app that corresponds to a website, if any (never a browser)."""

@@ -335,6 +335,13 @@ prompt = "Open Discord."
 checks = { tools_called_any = ["apps_open", "web_open"], tools_not_called = ["web_search"], not_contains = ["discord.com"] }
 
 [[case]]
+id = "tools-open-app-not-installed"
+category = "tools"
+note = "Photos is installed in the sandbox, Photoshop isn't. Must not open Photos or pretend."
+prompt = "Open Photoshop."
+checks = { contains_any = ["not installed", "isn't installed", "couldn't find", "can't find", "don't see", "not found", "doesn't seem", "don't have"], not_contains = ["opened the photos", "opened photos"] }
+
+[[case]]
 id = "tools-open-website-explicit"
 category = "tools"
 prompt = "Open the Discord website in my browser."

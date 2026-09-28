@@ -34,6 +34,7 @@ SANDBOX_APPS = [
     InstalledApp("Google Chrome", "shell:AppsFolder\\Chrome", "store"),
     InstalledApp("Microsoft Teams", "shell:AppsFolder\\MSTeams", "store"),
     InstalledApp("Visual Studio Code", "shell:AppsFolder\\Microsoft.VisualStudioCode", "store"),
+    InstalledApp("Photos", "shell:AppsFolder\\Microsoft.Windows.Photos", "store"),
 ]
 
 

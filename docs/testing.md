@@ -51,7 +51,7 @@ Tick each one. **"Asks"** means an approval prompt must appear.
 | B13 | "Open the Discord website" | discord.com opens in the browser. |
 | B14 | "Open youtube.com" | Browser opens YouTube. |
 | B15 | "Open Notepad" / "Open Spotify" | The apps open. |
-| B16 | "Open Photoshop" (assuming it's not installed) | Says it's not installed, doesn't pretend. |
+| B16 | "Open Photoshop" (assuming it's not installed) | Says it's not installed — does **not** open Photos or any other near-match. A typo like "open spotfy" still opens Spotify, and Jarvis says it was the closest match. |
 | B17 | "Search the web for best biryani in Hyderabad" | Browser search opens; Jarvis says it can't see results. |
 
 ### System, math

@@ -190,6 +190,8 @@ APPS = [
     InstalledApp("Microsoft Teams", r"shell:AppsFolder\MSTeams", "store"),
     InstalledApp("Visual Studio Code", r"shell:AppsFolder\VSCode", "store"),
     InstalledApp("Uninstall Spotify", r"C:\x\unins.lnk", "shortcut"),
+    InstalledApp("Photos", r"shell:AppsFolder\Microsoft.Windows.Photos", "store"),
+    InstalledApp("Adobe Photoshop Express", r"shell:AppsFolder\PSExpress", "store"),
 ]
 
 
@@ -208,7 +210,14 @@ def test_app_matching():
     assert cat.find("vs code") is None or cat.find("vs code").name == "Visual Studio Code"
     assert cat.find("visual studio").name == "Visual Studio Code"
     assert cat.find("notepad").source == "builtin"
-    assert cat.find("photoshop") is None
+    # the bug: "photoshop" opened Photos. Now it only matches a real Photoshop entry.
+    assert cat.find("photoshop").name == "Adobe Photoshop Express"
+    assert cat.find("photos").name == "Photos"
+    no_ps = StaticAppCatalog([a for a in APPS if "Photoshop" not in a.name])
+    assert no_ps.find("photoshop") is None
+    assert no_ps.lookup("spotfy") == (no_ps.find("spotify"), False)  # typo → flagged guess
+    assert cat.lookup("Discord")[1] is True
+    assert cat.find("gimp") is None
     assert all("Uninstall" not in a.name for a in cat.apps())
 
 
@@ -249,7 +258,9 @@ async def test_open_prefers_installed_app(app_ctx):
     await AppsOpen().run(AppArgs(name="Notepad"), app_ctx)
     assert opened[-1] == "notepad.exe"
     with pytest.raises(ToolError, match="doesn't seem to be installed"):
-        await AppsOpen().run(AppArgs(name="photoshop"), app_ctx)
+        await AppsOpen().run(AppArgs(name="gimp"), app_ctx)
+    guess = await AppsOpen().run(AppArgs(name="spotfy"), app_ctx)
+    assert "closest match" in guess and opened[-1].endswith("SpotifyMusic")
     with pytest.raises(ToolError):
         await WebOpen().run(UrlArgs(url="file:///C:/Windows/system32/cmd.exe"), app_ctx)
     await WebSearch().run(WebSearchArgs(query="best pizza near me"), app_ctx)

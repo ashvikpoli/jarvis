@@ -58,7 +58,7 @@ class AppsOpen(Tool):
 
     async def run(self, args: AppArgs, ctx: ToolContext):
         cat = catalog(ctx)
-        app = await asyncio.to_thread(cat.find, args.name)
+        app, exact = await asyncio.to_thread(cat.lookup, args.name)
         if app is None:
             if sys.platform != "win32" and ctx.apps is None:
                 raise ToolError("Opening apps by name only works on Windows.")
@@ -67,6 +67,11 @@ class AppsOpen(Tool):
                 "open its website with web_open instead."
             )
         ctx.launcher.open(app.target)
+        if not exact:
+            return (
+                f"Opened {app.name} — the closest match to “{args.name}” (no exact match "
+                "installed). Tell the user which app you opened."
+            )
         return f"Opened the {app.name} app."
 
 
