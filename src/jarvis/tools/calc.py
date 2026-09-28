@@ -98,8 +98,8 @@ class CalcArgs(BaseModel):
 class Calculate(Tool):
     name = "calculate"
     description = (
-        "Evaluate arithmetic exactly. Use it for any calculation beyond trivial "
-        "mental math instead of computing in your head."
+        "Evaluate arithmetic exactly. Use it for EVERY calculation, even simple ones like "
+        "15 * 4 — never compute numbers in your head."
     )
     risk = Risk.SAFE
     Args = CalcArgs
