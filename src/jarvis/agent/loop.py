@@ -164,7 +164,7 @@ class AgentLoop:
             )
             return result("error", f"Invalid arguments for {tool.name}: {problems}")
 
-        decision, risk = self.policy.decide(tool, args)
+        decision, risk = self.policy.decide(tool, args, ctx)
         how = "allowed"
         if decision == Decision.ASK:
             if approver is None:
@@ -173,7 +173,7 @@ class AgentLoop:
             else:
                 answer = await approver(
                     ApprovalRequest(
-                        tool=tool, args=args, risk=risk, description=tool.describe(args)
+                        tool=tool, args=args, risk=risk, description=tool.describe_in(args, ctx)
                     )
                 )
                 if answer == "session":

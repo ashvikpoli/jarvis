@@ -55,8 +55,12 @@ def _windows_known_folder(guid: str) -> Path | None:
 
 
 def resolve_root(spec: str) -> Path:
-    """'Documents' / 'Desktop' / 'Downloads' → the real folder; anything else → a path."""
+    """'Documents' / 'Desktop' / 'Downloads' / 'Jarvis' → the real folder; else a path."""
     key = spec.strip().lower()
+    if key == "jarvis":
+        from jarvis.core.config import REPO_ROOT
+
+        return REPO_ROOT.resolve()
     if key in _KNOWN_FOLDER_GUIDS:
         if sys.platform == "win32":
             found = _windows_known_folder(_KNOWN_FOLDER_GUIDS[key])
@@ -66,17 +70,29 @@ def resolve_root(spec: str) -> Path:
     return Path(os.path.expandvars(spec)).expanduser().resolve()
 
 
-def safe_path(raw: str, ctx: ToolContext, *, must_exist: bool = False) -> Path:
-    """Resolve a user/model-supplied path and make sure it's inside an allowed root.
+def _under(p: Path, bases: list[Path]) -> bool:
+    return any(p == b or p.is_relative_to(b) for b in bases)
+
+
+def in_workspace(p: Path, ctx: ToolContext) -> bool:
+    return _under(p, ctx.file_roots)
+
+
+def safe_path(raw: str, ctx: ToolContext, *, must_exist: bool = False, write: bool = False) -> Path:
+    """Resolve a model-supplied path and check it against the file zones.
 
     Accepts absolute paths, '~/...', a root's name ('Documents/notes.txt'), or a path
-    relative to the first root. Symlinks are resolved, so they can't escape either.
+    relative to the first root. Symlinks are resolved, so they can't sneak around
+    the checks. Raises ToolError with a user-facing reason when access isn't allowed.
     """
-    if not ctx.file_roots:
-        raise ToolError("No folders are enabled for file access.")
+    pol = ctx.files
     raw = (raw or "").strip().strip('"')
+    if not raw and not ctx.file_roots:
+        raise ToolError("No folders are enabled for file access.")
     p = Path(os.path.expandvars(raw)).expanduser() if raw else ctx.file_roots[0]
     if not p.is_absolute():
+        if not ctx.file_roots:
+            raise ToolError("Give me a full path; no default folders are enabled.")
         first, *rest = p.parts or (".",)
         by_name = {r.name.lower(): r for r in ctx.file_roots}
         p = (
@@ -85,7 +101,23 @@ def safe_path(raw: str, ctx: ToolContext, *, must_exist: bool = False) -> Path:
             else (ctx.file_roots[0] / p)
         )
     p = p.resolve()
-    if not any(p == r or p.is_relative_to(r) for r in ctx.file_roots):
+
+    if _under(p, pol.no_access):
+        raise ToolError(
+            f"{p} is a private location (passwords, keys or browser data). "
+            "I never read or change it."
+        )
+    inside = in_workspace(p, ctx)
+    if write:
+        if _under(p, pol.no_write):
+            raise ToolError(
+                f"{p} is a protected folder (system files or Jarvis's own "
+                "settings). I never change it, even with permission."
+            )
+        if not inside and pol.outside_writes != "ask":
+            allowed = ", ".join(str(r) for r in ctx.file_roots)
+            raise ToolError(f"{p} is outside the folders I can change ({allowed}).")
+    elif not inside and not pol.read_anywhere:
         allowed = ", ".join(str(r) for r in ctx.file_roots)
         raise ToolError(f"{p} is outside the folders I'm allowed to use ({allowed}).")
     if must_exist and not p.exists():
@@ -106,7 +138,38 @@ def _entry(p: Path) -> dict:
 class _FileTool(Tool):
     def description_for(self, ctx: ToolContext) -> str:
         roots = "; ".join(str(r) for r in ctx.file_roots) or "none"
-        return f"{self.description} Allowed folders: {roots}."
+        extra = (
+            " You can also read files elsewhere on this PC (not private or system data); "
+            "changing anything outside these folders needs the user's explicit OK."
+            if ctx.files.read_anywhere
+            else ""
+        )
+        return f"{self.description} The user's folders: {roots}.{extra}"
+
+
+class _WritingFileTool(_FileTool):
+    """A tool that changes files. Outside the workspace it's always destructive-level."""
+
+    def _write_paths(self, args) -> list[str]:
+        return [args.path]
+
+    def _outside(self, args, ctx: ToolContext | None) -> bool:
+        if ctx is None:
+            return False
+        for raw in self._write_paths(args):
+            try:
+                if not in_workspace(safe_path(raw, ctx, write=True), ctx):
+                    return True
+            except ToolError:
+                return False  # run() will refuse it with the reason
+        return False
+
+    def risk_in(self, args, ctx):
+        return Risk.DESTRUCTIVE if self._outside(args, ctx) else self.risk_for(args)
+
+    def describe_in(self, args, ctx):
+        text = self.describe(args)
+        return text + "  ⚠ OUTSIDE your usual folders" if self._outside(args, ctx) else text
 
 
 # ------------------------------------------------------------------ read-only
@@ -161,7 +224,13 @@ class FilesSearch(_FileTool):
         visited = 0
         for root in roots:
             for dirpath, dirnames, filenames in os.walk(root):
-                dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+                dirnames[:] = [
+                    d
+                    for d in dirnames
+                    if d not in SKIP_DIRS
+                    and not d.startswith(".")
+                    and not _under(Path(dirpath, d), ctx.files.no_access)
+                ]
                 for name in dirnames + filenames:
                     visited += 1
                     low = name.lower()
@@ -206,7 +275,7 @@ class WriteArgs(BaseModel):
     overwrite: bool = Field(False, description="Replace the file if it already exists.")
 
 
-class FilesWrite(_FileTool):
+class FilesWrite(_WritingFileTool):
     name = "files_write"
     description = "Create a text file. Won't replace an existing file unless overwrite=true."
     risk = Risk.CHANGE
@@ -221,7 +290,7 @@ class FilesWrite(_FileTool):
         return f"{verb} file {args.path} ({len(args.content)} chars: “{preview}”)"
 
     async def run(self, args: WriteArgs, ctx: ToolContext):
-        p = safe_path(args.path, ctx)
+        p = safe_path(args.path, ctx, write=True)
         if p.is_dir():
             raise ToolError(f"{p} is a folder.")
         if p.exists() and not args.overwrite:
@@ -235,7 +304,7 @@ class MkdirArgs(BaseModel):
     path: str = Field(description="Folder to create (parents are created too).")
 
 
-class FilesMkdir(_FileTool):
+class FilesMkdir(_WritingFileTool):
     name = "files_mkdir"
     description = "Create a folder."
     risk = Risk.CHANGE
@@ -245,7 +314,7 @@ class FilesMkdir(_FileTool):
         return f"create folder {args.path}"
 
     async def run(self, args: MkdirArgs, ctx: ToolContext):
-        p = safe_path(args.path, ctx)
+        p = safe_path(args.path, ctx, write=True)
         if p.exists():
             return f"{p} already exists."
         p.mkdir(parents=True)
@@ -257,23 +326,26 @@ class MoveArgs(BaseModel):
     destination: str = Field(description="New path. If it's an existing folder, moves inside it.")
 
 
-class FilesMove(_FileTool):
+class FilesMove(_WritingFileTool):
     name = "files_move"
     description = "Move or rename a file or folder. Never replaces an existing file."
     risk = Risk.CHANGE
     Args = MoveArgs
 
+    def _write_paths(self, args: MoveArgs) -> list[str]:
+        return [args.source, args.destination]
+
     def describe(self, args: MoveArgs) -> str:
         return f"move {args.source} → {args.destination}"
 
     async def run(self, args: MoveArgs, ctx: ToolContext):
-        src = safe_path(args.source, ctx, must_exist=True)
+        src = safe_path(args.source, ctx, must_exist=True, write=True)
         if src in ctx.file_roots:
             raise ToolError("I won't move one of the top-level allowed folders.")
-        dst = safe_path(args.destination, ctx)
+        dst = safe_path(args.destination, ctx, write=True)
         if dst.is_dir():
             dst = dst / src.name
-            safe_path(str(dst), ctx)
+            safe_path(str(dst), ctx, write=True)
         if dst.exists():
             raise ToolError(f"{dst} already exists.")
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -285,7 +357,7 @@ class DeleteArgs(BaseModel):
     path: str = Field(description="File or folder to delete (goes to the Recycle Bin).")
 
 
-class FilesDelete(_FileTool):
+class FilesDelete(_WritingFileTool):
     name = "files_delete"
     description = "Delete a file or folder by sending it to the Recycle Bin (recoverable)."
     risk = Risk.DESTRUCTIVE
@@ -297,11 +369,80 @@ class FilesDelete(_FileTool):
     async def run(self, args: DeleteArgs, ctx: ToolContext):
         from send2trash import send2trash
 
-        p = safe_path(args.path, ctx, must_exist=True)
-        if p in ctx.file_roots:
-            raise ToolError("I won't delete one of the top-level allowed folders.")
+        p = safe_path(args.path, ctx, must_exist=True, write=True)
+        if p in ctx.file_roots or p == Path(p.anchor):
+            raise ToolError("I won't delete one of the top-level folders or a whole drive.")
         send2trash(str(p))
         return f"Moved {p} to the Recycle Bin."
 
 
-FILE_TOOLS = [FilesList, FilesSearch, FilesRead, FilesWrite, FilesMkdir, FilesMove, FilesDelete]
+EXECUTABLE_SUFFIXES = {
+    ".exe",
+    ".bat",
+    ".cmd",
+    ".com",
+    ".ps1",
+    ".psm1",
+    ".vbs",
+    ".vbe",
+    ".js",
+    ".jse",
+    ".wsf",
+    ".wsh",
+    ".msi",
+    ".msp",
+    ".scr",
+    ".pif",
+    ".lnk",
+    ".reg",
+    ".hta",
+    ".cpl",
+    ".jar",
+    ".appx",
+    ".msix",
+    ".application",
+    ".url",
+    ".sh",
+    ".py",
+    ".pyw",
+}
+
+
+class OpenArgs(BaseModel):
+    path: str = Field(description="File or folder to open, e.g. 'Documents/report.pdf'.")
+
+
+class FilesOpen(_FileTool):
+    name = "files_open"
+    description = (
+        "Open a file in its default app (like double-clicking it) — documents, PDFs, "
+        "spreadsheets, images, videos — or open a folder in File Explorer. "
+        "Use this when the user says 'open <file>'. Doesn't run programs or scripts."
+    )
+    risk = Risk.CHANGE
+    Args = OpenArgs
+
+    def describe(self, args: OpenArgs) -> str:
+        return f"open {args.path}"
+
+    async def run(self, args: OpenArgs, ctx: ToolContext):
+        p = safe_path(args.path, ctx, must_exist=True)
+        if p.is_file() and p.suffix.lower() in EXECUTABLE_SUFFIXES:
+            raise ToolError(
+                f"{p.name} is a program or script; I don't run those by opening files. "
+                "(To start an installed app, use apps_open.)"
+            )
+        ctx.launcher.open(str(p))
+        return f"Opened {p}" + (" in File Explorer." if p.is_dir() else ".")
+
+
+FILE_TOOLS = [
+    FilesList,
+    FilesSearch,
+    FilesRead,
+    FilesOpen,
+    FilesWrite,
+    FilesMkdir,
+    FilesMove,
+    FilesDelete,
+]

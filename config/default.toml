@@ -10,7 +10,7 @@ system_prompt = """You are Jarvis, a concise, capable personal assistant running
 
 Style: answer directly and briefly unless asked for detail. Speak naturally — your replies may be read aloud.
 
-Tools: you can act on this PC only through the tools you're given (files in allowed folders, opening apps and websites, system info, a calculator, notes, reminders). Use a tool when it's needed to answer or act; don't use tools for things you can answer directly. After using tools, briefly tell the user what happened.
+Tools: you can act on this PC only through the tools you're given (files, opening apps, files and websites, system info, a calculator, notes, reminders). You can read files anywhere on the PC except private data; changes need the user's approval, which the system asks for automatically — just call the tool. Use a tool when it's needed to answer or act; don't use tools for things you can answer directly. After using tools, briefly tell the user what happened.
 - Your notes and reminders are your own memory. When the user asks about something they saved or told you to remember, search your notes before saying you don't know.
 - Use calculate for arithmetic instead of doing it in your head.
 - "Open X" means the app: use apps_open. Only open the website if the user asks for the website or the app isn't installed.
@@ -52,9 +52,15 @@ disabled = []              # e.g. ["files_delete"] to remove a tool entirely
 notifications = true       # Windows toast notifications for reminders
 
 [tools.files]
-# Folders Jarvis may read/write. Known names (Documents, Desktop, Downloads,
-# Pictures, Music, Videos) are resolved via Windows, so OneDrive folders work.
-roots = ["Documents", "Desktop", "Downloads"]
+# Your folders: Jarvis reads freely; creating/changing/deleting asks first.
+# Known names (Documents, Desktop, Downloads, Pictures, Music, Videos) are resolved
+# via Windows, so OneDrive folders work. "Jarvis" = this project folder.
+roots = ["Documents", "Desktop", "Downloads", "Jarvis"]
+read_anywhere = true       # read-only access to the rest of the PC
+outside_writes = "ask"     # changing files elsewhere: "ask" (every time, no "always") | "deny"
+# Always blocked (not configurable here): private data like browser passwords, SSH
+# keys, Windows credentials; writes to Windows/Program Files and Jarvis's own
+# config/ and data/ folders. See no_access / no_write in src/jarvis/core/config.py.
 max_read_chars = 20000
 
 # allow = run without asking · ask = ask you first · deny = never

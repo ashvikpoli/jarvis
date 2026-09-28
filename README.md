@@ -77,11 +77,22 @@ youtube.com"* (opens the app instead if one is installed, unless you say "websit
 
 | Permission | Tools |
 |---|---|
-| runs automatically | list/search/read files, system info, time, list apps, notes, reminders, open apps & websites |
+| runs automatically | list/search/read/open files, system info, time, list apps, notes, reminders, open apps & websites |
 | asks you first | create files/folders, move/rename, delete (→ Recycle Bin), overwrite |
 
-- File access is limited to **Documents, Desktop, Downloads** (OneDrive-aware). Change
-  in `[tools.files] roots`.
+**File zones**
+
+| Where | Read | Create / change / delete |
+|---|---|---|
+| Your folders: Documents, Desktop, Downloads, this Jarvis folder | ✅ | asks first |
+| Everywhere else on the PC | ✅ read-only | asks **every time** (red, "outside your folders", no "always") |
+| Private data: browser profiles, SSH keys, Windows credentials, password managers | ❌ | ❌ |
+| Windows, Program Files, Jarvis's own `config/` and `data/` | ✅ | ❌ never, even with approval |
+
+Jarvis can't edit its own settings — otherwise it could grant itself permissions.
+Change your folders in `[tools.files] roots`; set `outside_writes = "deny"` to forbid
+changes outside them entirely, or `read_anywhere = false` to restrict reading too.
+
 - At an approval prompt: `y` = once, `n` = no, `a` = always for this session (not
   offered for delete/overwrite).
 - Reminders pop up as Windows notifications **while Jarvis is running** (`chat` or
@@ -106,7 +117,8 @@ files_write = "allow"    # stop asking before creating new files
 files_delete = "deny"    # never delete
 
 [tools.files]
-roots = ["Documents", "Desktop", "Downloads", "D:\\Projects"]
+roots = ["Documents", "Desktop", "Downloads", "Jarvis", "D:\\Projects"]  # list them all
+outside_writes = "deny"
 ```
 
 Env vars override everything: `$env:JARVIS_MODELS__ROLES__CHAT = "ollama:qwen3:8b"`.

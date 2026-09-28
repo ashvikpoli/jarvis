@@ -5,7 +5,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from jarvis.storage import Database
-from jarvis.tools import ReminderScheduler, ToolContext, ToolError, reminder_rows, resolve_root
+from jarvis.tools import (
+    ReminderScheduler,
+    Risk,
+    ToolContext,
+    ToolError,
+    reminder_rows,
+    resolve_root,
+)
 from jarvis.tools.apps import InstalledApp, StaticAppCatalog
 from jarvis.tools.base import NoArgs
 from jarvis.tools.files import (
@@ -371,3 +378,108 @@ async def test_calculate_tool_output(ctx):
     from jarvis.tools.calc import CalcArgs, Calculate
 
     assert await Calculate().run(CalcArgs(expression="1234*5678"), ctx) == "1234*5678 = 7,006,652"
+
+
+# ------------------------------------------------------------------ file zones
+
+
+@pytest.fixture
+def zoned(roots, tmp_path):
+    """Workspace = roots; rest of tmp_path readable; secrets + system blocked."""
+    from jarvis.tools.base import FilePolicy
+
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "id_rsa").write_text("KEY")
+    (tmp_path / "system").mkdir()
+    (tmp_path / "system" / "win.ini").write_text("[fonts]")
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "notes.txt").write_text("outside notes")
+    return ToolContext(
+        db=Database(":memory:"),
+        file_roots=roots,
+        launcher=FakeLauncher(),
+        notifier=FakeNotifier(),
+        clock=lambda: NOW,
+        files=FilePolicy(
+            read_anywhere=True,
+            outside_writes="ask",
+            no_access=[(tmp_path / "secrets").resolve()],
+            no_write=[(tmp_path / "system").resolve()],
+        ),
+    )
+
+
+async def test_read_anywhere_but_not_secrets(zoned, tmp_path):
+    out = await FilesRead().run(ReadArgs(path=str(tmp_path / "elsewhere" / "notes.txt")), zoned)
+    assert out["content"] == "outside notes"
+    sys_ini = await FilesRead().run(ReadArgs(path=str(tmp_path / "system" / "win.ini")), zoned)
+    assert "[fonts]" in sys_ini["content"]  # system files are readable, just not writable
+    with pytest.raises(ToolError, match="private"):
+        await FilesRead().run(ReadArgs(path=str(tmp_path / "secrets" / "id_rsa")), zoned)
+    with pytest.raises(ToolError, match="private"):
+        await FilesList().run(ListArgs(path=str(tmp_path / "secrets")), zoned)
+    # search never walks into private folders
+    hits = await FilesSearch().run(SearchArgs(query="id_rsa", path=str(tmp_path)), zoned)
+    assert hits["matches"] == []
+
+
+async def test_outside_writes_are_allowed_only_after_approval_and_system_never(zoned, tmp_path):
+    target = str(tmp_path / "elsewhere" / "new.txt")
+    w = FilesWrite()
+    args = WriteArgs(path=target, content="x")
+    # permission layer: outside → destructive (always asks, no "always" option)
+    assert w.risk_in(args, zoned) == Risk.DESTRUCTIVE
+    assert "OUTSIDE" in w.describe_in(args, zoned)
+    inside = WriteArgs(path="Desktop/in.txt", content="x")
+    assert w.risk_in(inside, zoned) == Risk.CHANGE and "OUTSIDE" not in w.describe_in(inside, zoned)
+    # once approved, the tool itself performs it
+    await w.run(args, zoned)
+    assert (tmp_path / "elsewhere" / "new.txt").read_text() == "x"
+
+    for bad in (str(tmp_path / "system" / "evil.dll"), str(tmp_path / "secrets" / "x")):
+        with pytest.raises(ToolError, match="protected|private"):
+            await w.run(WriteArgs(path=bad, content="x"), zoned)
+    with pytest.raises(ToolError, match="protected"):
+        await FilesDelete().run(DeleteArgs(path=str(tmp_path / "system" / "win.ini")), zoned)
+    # moving a file OUT of a protected folder is a change to that folder too
+    with pytest.raises(ToolError, match="protected"):
+        await FilesMove().run(
+            MoveArgs(source=str(tmp_path / "system" / "win.ini"), destination="Desktop"), zoned
+        )
+    mv = FilesMove()
+    assert mv.risk_in(MoveArgs(source="report.txt", destination=target + "2"), zoned) == (
+        Risk.DESTRUCTIVE
+    )
+
+
+async def test_outside_writes_deny_mode(zoned, tmp_path):
+    zoned.files.outside_writes = "deny"
+    with pytest.raises(ToolError, match="outside the folders I can change"):
+        await FilesWrite().run(
+            WriteArgs(path=str(tmp_path / "elsewhere" / "n.txt"), content="x"), zoned
+        )
+
+
+async def test_files_open(zoned, roots):
+    from jarvis.tools.files import FilesOpen, OpenArgs
+
+    await FilesOpen().run(OpenArgs(path="report.txt"), zoned)
+    assert zoned.launcher.opened[-1] == str(roots[0] / "report.txt")
+    await FilesOpen().run(OpenArgs(path="Documents/projects"), zoned)  # folder → Explorer
+    (roots[1] / "setup.exe").write_bytes(b"MZ")
+    (roots[1] / "run.ps1").write_text("rm -r")
+    for exe in ("Desktop/setup.exe", "Desktop/run.ps1"):
+        with pytest.raises(ToolError, match="program or script"):
+            await FilesOpen().run(OpenArgs(path=exe), zoned)
+    assert len(zoned.launcher.opened) == 2
+
+
+def test_jarvis_root_and_self_protection(make_app):
+    from jarvis.core.config import REPO_ROOT
+
+    assert resolve_root("Jarvis") == REPO_ROOT.resolve()
+    app, _ = make_app()
+    ctx = app.tool_context()
+    assert app.settings.config_dir.resolve() in ctx.files.no_write
+    assert app.settings.app.data_dir.resolve() in ctx.files.no_write
+    assert ctx.files.read_anywhere and ctx.files.outside_writes == "ask"

@@ -8,6 +8,7 @@ components testable and swappable without a DI framework.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from jarvis.tools import (
     resolve_root,
 )
 from jarvis.tools.apps import AppCatalog
+from jarvis.tools.base import FilePolicy
 from jarvis.tools.notify import LogNotifier, MultiNotifier, default_notifier
 
 log = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ class JarvisApp:
         notifier: MultiNotifier,
         file_roots: list[Path],
         apps: AppCatalog | None = None,
+        file_policy: FilePolicy | None = None,
     ):
         self.settings = settings
         self.models = models
@@ -71,6 +74,7 @@ class JarvisApp:
         )
         self.scheduler = ReminderScheduler(db, notifier)
         self.apps = apps or AppCatalog()
+        self.file_policy = file_policy or FilePolicy()
 
     @classmethod
     def create(
@@ -124,6 +128,26 @@ class JarvisApp:
                     file_roots.append(root)
                 else:
                     log.info("file root %r (%s) doesn't exist; skipping", spec, root)
+        fcfg = tcfg.files
+
+        def _paths(specs: list[str]) -> list[Path]:
+            out = []
+            for spec in specs:
+                expanded = os.path.expandvars(spec)
+                if "%" in expanded:  # variable not set on this OS
+                    continue
+                out.append(Path(expanded).expanduser().resolve())
+            return out
+
+        file_policy = FilePolicy(
+            read_anywhere=fcfg.read_anywhere,
+            outside_writes=fcfg.outside_writes,
+            no_access=_paths(fcfg.no_access),
+            # Jarvis may never edit its own settings or database: that would let it
+            # grant itself permissions.
+            no_write=_paths(fcfg.no_write)
+            + [settings.config_dir.resolve(), settings.app.data_dir.resolve()],
+        )
         base_notifier = default_notifier() if tcfg.notifications else MultiNotifier(LogNotifier())
         if notifier is not None:
             base_notifier = MultiNotifier(notifier)
@@ -139,6 +163,7 @@ class JarvisApp:
             notifier=base_notifier,
             file_roots=file_roots,
             apps=apps,
+            file_policy=file_policy,
         )
 
     def tool_context(self, conversation_id: int | None = None) -> ToolContext:
@@ -150,6 +175,7 @@ class JarvisApp:
             conversation_id=conversation_id,
             max_read_chars=self.settings.tools.files.max_read_chars,
             apps=self.apps,
+            files=self.file_policy,
         )
 
     async def chat_stream(

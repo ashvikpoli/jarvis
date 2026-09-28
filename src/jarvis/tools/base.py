@@ -41,6 +41,23 @@ class Launcher(Protocol):
 
 
 @dataclass
+class FilePolicy:
+    """Where file tools may read and write, beyond the workspace roots.
+
+    workspace roots (ToolContext.file_roots): read freely, changes ask (normal risk)
+    elsewhere: read if read_anywhere; changes per outside_writes ("ask" = always ask,
+               as destructive; "deny" = never)
+    no_access: never read or write (secrets: browser profiles, SSH keys, credentials)
+    no_write:  never change, even with approval (Windows, Program Files, Jarvis config)
+    """
+
+    read_anywhere: bool = False
+    outside_writes: str = "deny"  # ask | deny
+    no_access: list[Path] = field(default_factory=list)
+    no_write: list[Path] = field(default_factory=list)
+
+
+@dataclass
 class ToolContext:
     """Everything a tool may touch. Built per conversation by JarvisApp."""
 
@@ -51,6 +68,7 @@ class ToolContext:
     conversation_id: int | None = None
     max_read_chars: int = 20_000
     apps: Any = None  # AppCatalog; None = the shared real one
+    files: FilePolicy = field(default_factory=FilePolicy)
     clock: Any = field(default=lambda: datetime.now().astimezone())
 
 
@@ -67,6 +85,14 @@ class Tool(ABC):
     def risk_for(self, args: BaseModel) -> Risk:
         """Risk can depend on arguments (e.g. overwrite=True). Default: static."""
         return self.risk
+
+    def risk_in(self, args: BaseModel, ctx: ToolContext | None) -> Risk:
+        """Risk given the context too (e.g. a path outside your folders). Default: risk_for."""
+        return self.risk_for(args)
+
+    def describe_in(self, args: BaseModel, ctx: ToolContext | None) -> str:
+        """Approval-prompt text given the context. Default: describe."""
+        return self.describe(args)
 
     def describe(self, args: BaseModel) -> str:
         """One line for approval prompts and logs."""

@@ -374,8 +374,22 @@ def _print_reminders(app: JarvisApp) -> None:
 def cmd_tools(settings: Settings, args: argparse.Namespace) -> int:
     app = JarvisApp.create(settings)
     console.print(_tools_table(app))
-    roots = ", ".join(str(r) for r in app.file_roots) or "[red]none found[/]"
-    console.print(f"\n[dim]File access limited to: {roots}[/]")
+    pol = app.file_policy
+    console.print("\n[bold]File access[/]")
+    for r in app.file_roots:
+        console.print(
+            f"  [green]your folder[/]  {r}  [dim](read freely; changes ask)[/]", highlight=False
+        )
+    if not app.file_roots:
+        console.print("  [red]none of the configured folders exist[/]")
+    rest = "read-only" if pol.read_anywhere else "no access"
+    writes = "every change asks (no 'always')" if pol.outside_writes == "ask" else "no changes"
+    console.print(f"  [yellow]everywhere else[/]  {rest}; {writes}")
+    console.print(
+        f"  [red]never touched[/]  {len(pol.no_access)} private locations "
+        "(browser data, keys, credentials)"
+    )
+    console.print("  [red]never changed[/]  Windows, Program Files, Jarvis config & data")
     asyncio.run(app.aclose())
     return 0
 

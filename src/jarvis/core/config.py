@@ -46,6 +46,7 @@ DEFAULT_PERMISSION_OVERRIDES = {
     "apps_open": "allow",
     "web_open": "allow",
     "web_search": "allow",
+    "files_open": "allow",
 }
 
 
@@ -61,9 +62,54 @@ class ToolPermissions(BaseModel):
         return {**DEFAULT_PERMISSION_OVERRIDES, **self.overrides}
 
 
+# Never read or written: secrets that would let anyone impersonate the user.
+DEFAULT_NO_ACCESS = [
+    "~/.ssh",
+    "~/.aws",
+    "~/.azure",
+    "~/.gnupg",
+    "~/.kube",
+    "~/.docker",
+    "%APPDATA%/Microsoft/Credentials",
+    "%LOCALAPPDATA%/Microsoft/Credentials",
+    "%APPDATA%/Microsoft/Protect",
+    "%APPDATA%/Microsoft/Crypto",
+    "%LOCALAPPDATA%/Microsoft/Vault",
+    "%LOCALAPPDATA%/Google/Chrome/User Data",
+    "%LOCALAPPDATA%/Microsoft/Edge/User Data",
+    "%LOCALAPPDATA%/BraveSoftware",
+    "%APPDATA%/Mozilla/Firefox/Profiles",
+    "%APPDATA%/Opera Software",
+    "%LOCALAPPDATA%/Vivaldi",
+    "%APPDATA%/discord/Local Storage",
+    "%APPDATA%/Bitwarden",
+    "%LOCALAPPDATA%/1Password",
+    "%APPDATA%/KeePass",
+    "%APPDATA%/KeePassXC",
+]
+# Never changed, even with approval (reading is fine).
+DEFAULT_NO_WRITE = [
+    "%SystemRoot%",
+    "%ProgramFiles%",
+    "%ProgramFiles(x86)%",
+    "%ProgramData%",
+    "C:/$Recycle.Bin",
+    "C:/System Volume Information",
+    "C:/Recovery",
+    "C:/Boot",
+]
+
+
 class FileToolSettings(BaseModel):
-    # Known folder names (resolved via Windows, OneDrive-aware) or explicit paths.
-    roots: list[str] = Field(default_factory=lambda: ["Documents", "Desktop", "Downloads"])
+    # Your folders: read freely, changes ask. Known names (Documents, Desktop, Downloads,
+    # Pictures, Music, Videos — OneDrive-aware) or "Jarvis" (this project) or paths.
+    roots: list[str] = Field(
+        default_factory=lambda: ["Documents", "Desktop", "Downloads", "Jarvis"]
+    )
+    read_anywhere: bool = True  # read-only access to the rest of the PC
+    outside_writes: str = "ask"  # changes outside your folders: ask (every time) | deny
+    no_access: list[str] = Field(default_factory=lambda: list(DEFAULT_NO_ACCESS))
+    no_write: list[str] = Field(default_factory=lambda: list(DEFAULT_NO_WRITE))
     max_read_chars: int = 20_000
 
 

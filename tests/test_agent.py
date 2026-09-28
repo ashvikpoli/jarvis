@@ -44,7 +44,7 @@ def test_default_registry_specs_are_valid(make_app):
         assert s["function"]["parameters"]["type"] == "object"
         assert "title" not in s["function"]["parameters"]
     files_list = next(s for s in specs if s["function"]["name"] == "files_list")
-    assert "Allowed folders" in files_list["function"]["description"]
+    assert "The user's folders" in files_list["function"]["description"]
 
 
 def test_duplicate_tool_rejected():
@@ -228,3 +228,29 @@ def test_orphan_tool_messages_trimmed():
     built = pb.build(history)
     assert [m.role for m in built.messages] == ["system", "user"]
     assert built.messages[1].content == "next"
+
+
+async def test_outside_write_always_prompts_even_after_always(make_app, tmp_path):
+    """End to end: 'always' for files_write covers your folders, never outside them."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    prompts = []
+
+    async def approver(req):
+        prompts.append((req.risk, req.can_allow_for_session, req.description))
+        return "session" if req.can_allow_for_session else "deny"
+
+    app, _ = make_app(
+        [
+            [call("files_write", path="Desktop/a.txt", content="1")],
+            [call("files_write", path="Desktop/b.txt", content="2")],
+            [call("files_write", path=str(outside / "c.txt"), content="3")],
+            "done",
+        ]
+    )
+    await run_turn(app, "write three files", approver)
+    assert (app.file_roots[1] / "b.txt").exists()
+    assert not (outside / "c.txt").exists()
+    assert len(prompts) == 2  # a.txt asked (→ always), b.txt silent, c.txt asked again
+    assert prompts[1][0] == Risk.DESTRUCTIVE and not prompts[1][1]
+    assert "OUTSIDE" in prompts[1][2]

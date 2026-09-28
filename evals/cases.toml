@@ -309,6 +309,13 @@ prompt = "What's on my to-do list? It's todo.txt on my Desktop."
 checks = { tools_called = ["files_read"], contains_all = ["milk"] }
 
 [[case]]
+id = "tools-open-file"
+category = "tools"
+note = "'Open' a document = launch it in its app (files_open), not read it into chat."
+prompt = "Open my Q3 report."
+checks = { tools_called = ["files_open"], tool_args = { files_open = { path = "report-q3" } } }
+
+[[case]]
 id = "tools-write-file"
 category = "tools"
 prompt = "Create a file called shopping.txt on my Desktop with milk and eggs on separate lines."

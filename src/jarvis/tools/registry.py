@@ -92,8 +92,10 @@ class PermissionPolicy:
         self.overrides = {k: Decision(v) for k, v in (overrides or {}).items()}
         self.session_allowed: set[str] = set()
 
-    def decide(self, tool: Tool, args: BaseModel) -> tuple[Decision, Risk]:
-        risk = tool.risk_for(args)
+    def decide(
+        self, tool: Tool, args: BaseModel, ctx: ToolContext | None = None
+    ) -> tuple[Decision, Risk]:
+        risk = tool.risk_in(args, ctx)
         # Escalated risk (e.g. overwrite=True) ignores a lower-risk "allow" override.
         override = self.overrides.get(tool.name)
         if override is not None and (risk == tool.risk or override != Decision.ALLOW):
