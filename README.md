@@ -130,6 +130,6 @@ evals/cases.toml      eval cases — add one whenever Jarvis gets something wron
 
 ## Roadmap
 
-0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions (testing) · 3 Memory ·
+0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions ✅ · 3 Memory ·
 4 Voice MVP · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
 8 Polish + packaging

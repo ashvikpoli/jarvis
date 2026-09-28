@@ -58,7 +58,12 @@ class Sandbox:
 
 
 def make_sandbox() -> Sandbox:
-    root = Path(tempfile.mkdtemp(prefix="jarvis-eval-"))
+    # Fixed path (recreated per case): tool descriptions mention the folders, so a
+    # random name would change the prompt every case and defeat Ollama's prompt cache,
+    # making eval latency look worse than real use. Cases run one at a time.
+    root = Path(tempfile.gettempdir()) / "jarvis-eval-sandbox"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
     for rel, content in FIXTURE_FILES.items():
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
