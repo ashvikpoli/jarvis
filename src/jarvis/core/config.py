@@ -26,7 +26,7 @@ class LoggingSettings(BaseModel):
 
 
 class ModelsSettings(BaseModel):
-    roles: dict[str, str] = Field(default_factory=lambda: {"chat": "ollama:qwen3:14b"})
+    roles: dict[str, str] = Field(default_factory=lambda: {"chat": "ollama:qwen3:8b"})
     # Per-role generation options, e.g. {"chat": {"think": False, "temperature": 0.7}}
     options: dict[str, dict[str, Any]] = Field(default_factory=dict)
 

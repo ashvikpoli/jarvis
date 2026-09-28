@@ -24,7 +24,7 @@ We run natively on Windows because later phases control the Windows desktop.
    ```powershell
    cd jarvis
    uv sync                   # creates .venv, installs Python 3.12 if needed + deps
-   ollama pull qwen3:14b     # ~9 GB; or whichever chat model you pick
+   ollama pull qwen3:8b      # ~5 GB; the default chat model (picked by evals)
    uv run jarvis doctor      # everything should be green
    uv run jarvis chat
    ```
@@ -35,7 +35,7 @@ We run natively on Windows because later phases control the Windows desktop.
 uv run jarvis chat                          # talk to Jarvis (new conversation)
 uv run jarvis chat --resume                 # continue the most recent conversation
 uv run jarvis chat --resume 3               # continue conversation #3
-uv run jarvis chat --model ollama:qwen3:8b  # try another model
+uv run jarvis chat --model ollama:qwen3:14b # try another model
 uv run jarvis chat --show-thinking          # turn reasoning on and show it
 uv run jarvis chat --echo                   # offline, no model needed
 uv run jarvis history                       # list conversations
@@ -67,7 +67,7 @@ Copy only the keys you want to change into `config/local.toml` (git-ignored):
 
 ```toml
 [models]
-roles = { chat = "ollama:qwen3:8b" }
+roles = { chat = "ollama:qwen3:14b" }
 
 [models.options.chat]
 think = true    # let the model reason first (slower, sometimes smarter)

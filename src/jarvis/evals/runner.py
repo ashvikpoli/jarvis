@@ -141,25 +141,36 @@ class EvalRunner:
 
 
 def print_report(results: list[ModelResult], console: Console, *, verbose: bool = False) -> None:
-    categories = sorted({c for r in results for c in r.by_category()})
-    table = Table(title="Eval results", header_style="bold")
-    table.add_column("Model")
-    table.add_column("Pass", justify="right")
-    for cat in categories:
-        table.add_column(cat, justify="right")
-    table.add_column("Answer ms", justify="right")
-    table.add_column("tok/s", justify="right")
+    # Summary: one row per model. Kept narrow so it fits a normal terminal.
+    summary = Table(title="Eval results", header_style="bold")
+    summary.add_column("Model", no_wrap=True)
+    summary.add_column("Pass", justify="right", no_wrap=True)
+    summary.add_column("Answer ms", justify="right")
+    summary.add_column("tok/s", justify="right")
     for r in results:
-        cats = r.by_category()
         ttft, tps = r.median_answer_ttft_ms, r.median_tokens_per_s
-        table.add_row(
+        summary.add_row(
             r.model,
             f"{r.passed}/{len(r.cases)} ({r.pass_rate:.0%})",
-            *[f"{cats[c][0]}/{cats[c][1]}" if c in cats else "-" for c in categories],
             f"{ttft:.0f}" if ttft else "-",
             f"{tps:.0f}" if tps else "-",
         )
-    console.print(table)
+    console.print(summary)
+
+    # Breakdown: categories as rows, models as columns (scales with more categories).
+    categories = sorted({c for r in results for c in r.by_category()})
+    breakdown = Table(title="By category", header_style="bold")
+    breakdown.add_column("Category", no_wrap=True)
+    for r in results:
+        breakdown.add_column(r.model.split(":", 1)[-1], justify="right", no_wrap=True)
+    for cat in categories:
+        cells = []
+        for r in results:
+            p, t = r.by_category().get(cat, (0, 0))
+            style = "green" if t and p == t else ("red" if t and p == 0 else "yellow")
+            cells.append(f"[{style}]{p}/{t}[/]" if t else "-")
+        breakdown.add_row(cat, *cells)
+    console.print(breakdown)
 
     for r in results:
         failed = [c for c in r.cases if not c.passed]

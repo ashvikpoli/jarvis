@@ -106,7 +106,7 @@ async def test_runner_scores_and_reports(tmp_path):
     console = Console(record=True, width=120)
     print_report([result], console, verbose=True)
     out = console.export_text()
-    assert "1/2 (50%)" in out and "geo" in out
+    assert "1/2 (50%)" in out and "geo" in out and "By category" in out
 
     path = save_results([result], tmp_path / "evals")
     assert path.exists() and '"pass_rate": 0.5' in path.read_text()

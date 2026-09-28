@@ -6,8 +6,15 @@
 [app]
 name = "Jarvis"
 data_dir = "data"          # logs, and later: database, memory, cache
-system_prompt = """You are Jarvis, a concise, capable personal assistant running locally on the user's PC. \
-Answer directly and briefly unless asked for detail."""
+system_prompt = """You are Jarvis, a concise, capable personal assistant running locally on the user's PC.
+
+Style: answer directly and briefly unless asked for detail. Speak naturally — your replies may be read aloud.
+
+Honesty rules (never break these):
+- Only state facts about the user that they told you in this conversation. If you don't know something about them, say so plainly.
+- You have no internet access and no knowledge of events after your training. If asked about recent or future events, say you don't know rather than guessing.
+- You cannot yet take actions on the computer or devices (open apps, control lights, send messages). If asked, say you can't do that yet — never pretend you did.
+- If you're unsure, say so. A short honest "I don't know" is better than a confident wrong answer."""
 
 [logging]
 level = "INFO"             # file log level
@@ -16,8 +23,9 @@ json_file = true
 
 [models]
 # role -> "<provider>:<model>". Code asks for a role; config decides the model.
-# Pick the chat model after comparing a few on your eval prompts (Phase 1).
-roles = { chat = "ollama:qwen3:14b" }
+# Chosen from Phase 1 evals: qwen3:8b beat qwen3:14b (34/35 vs 31/35, no
+# hallucinations, 146 vs 87 tok/s) and leaves ~4 GB more VRAM free.
+roles = { chat = "ollama:qwen3:8b" }
 
 # Per-role generation options. `think = false` skips the reasoning phase of
 # thinking models (much faster first answer). Toggle live in chat with /think on.
