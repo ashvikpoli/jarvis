@@ -7,7 +7,7 @@ PowerShell in `C:\Jarvis`. Start with `uv sync` so you're on the latest dependen
 
 | # | Command | Expected |
 |---|---|---|
-| A1 | `uv run pytest` | All pass. On Windows this also runs the Windows-only path-escape tests. |
+| A1 | `uv run python -m pytest` | All pass. On Windows this also runs the Windows-only path-escape tests. (Use `python -m pytest`, not `pytest`: Windows Smart App Control blocks the unsigned `pytest.exe` launcher.) |
 | A2 | `uv run jarvis doctor` | All ✓. VRAM line 100% on GPU. |
 | A3 | `uv run jarvis eval -v` | Full suite (55 cases, ~5 min). Target ≥ 95%, answer ms < 100. |
 | A4 | `uv run jarvis tools` | 22 tools; `files_write/mkdir/move/delete` = ask, the rest allow. File access lists your 4 folders + the zone rules. |

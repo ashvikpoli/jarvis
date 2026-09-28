@@ -51,7 +51,7 @@ uv run jarvis apps [name]                   # installed apps Jarvis can open
 uv run jarvis notify                        # test Windows notifications
 uv run jarvis serve                         # HTTP API on http://127.0.0.1:8765/docs
 uv run jarvis doctor                        # diagnose setup, VRAM fit, latency
-uv run pytest                               # tests
+uv run python -m pytest                     # tests (python -m: Smart App Control blocks pytest.exe)
 ```
 
 In chat: `/new`, `/list`, `/resume ID`, `/title TEXT`, `/think on|off`,
@@ -120,6 +120,11 @@ files_delete = "deny"    # never delete
 roots = ["Documents", "Desktop", "Downloads", "Jarvis", "D:\\Projects"]  # list them all
 outside_writes = "deny"
 ```
+
+If Windows says *"An Application Control policy has blocked this file"*, that's Smart
+App Control blocking an unsigned launcher in `.venv\Scripts`. Use the module form
+instead: `uv run python -m jarvis chat`, `uv run python -m pytest`. Don't disable
+Smart App Control (it can't be re-enabled without a reset).
 
 Env vars override everything: `$env:JARVIS_MODELS__ROLES__CHAT = "ollama:qwen3:8b"`.
 
