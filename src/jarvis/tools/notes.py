@@ -36,7 +36,10 @@ class NoteAddArgs(BaseModel):
 
 class NotesAdd(Tool):
     name = "notes_add"
-    description = "Save a note for the user to recall later."
+    description = (
+        "Save something the user wants remembered (numbers, passwords, ideas, facts) "
+        "into Jarvis's own notes."
+    )
     risk = Risk.CHANGE
     Args = NoteAddArgs
 
@@ -78,7 +81,10 @@ def _note_rows(ctx: ToolContext, query: str, limit: int) -> list[dict]:
 
 class NotesSearch(Tool):
     name = "notes_search"
-    description = "Search or list the user's saved notes."
+    description = (
+        "Search Jarvis's own saved notes. Use this whenever the user asks about something "
+        "they saved, noted, or asked you to remember."
+    )
     risk = Risk.SAFE
     Args = NoteSearchArgs
 

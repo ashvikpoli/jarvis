@@ -271,3 +271,46 @@ def test_scheduler_thread_starts_and_stops(ctx):
     sched.start()
     sched.stop()
     assert not sched._thread.is_alive()
+
+
+# ------------------------------------------------------------------ calculator
+
+
+@pytest.mark.parametrize(
+    "expr,expected",
+    [
+        ("1234 * 5678", 7006652),
+        ("1,234 × 5,678", 7006652),
+        ("12*12", 144),
+        ("(15/100) * 240", 36),
+        ("18% of 2450", 441),
+        ("2^10", 1024),
+        ("sqrt(144)", 12),
+        ("round(10/3, 2)", 3.33),
+        ("-(3 + 4) * 2", -14),
+        ("10 % 3", 1),
+        ("max(1,2)", 2),
+        ("2,450 * 0.18", 441),
+    ],
+)
+def test_calculate(expr, expected):
+    from jarvis.tools.calc import calculate
+
+    assert calculate(expr) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    ["__import__('os').system('calc')", "open('x')", "a + 1", "2 ** 999999", "1/0", "lambda: 1"],
+)
+def test_calculate_rejects_unsafe_or_invalid(expr):
+    from jarvis.tools.calc import calculate
+
+    with pytest.raises(ToolError):
+        calculate(expr)
+
+
+async def test_calculate_tool_output(ctx):
+    from jarvis.tools.calc import CalcArgs, Calculate
+
+    assert await Calculate().run(CalcArgs(expression="1234*5678"), ctx) == "1234*5678 = 7,006,652"

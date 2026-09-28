@@ -1,6 +1,7 @@
 """Tools Jarvis can use, plus the registry / permission / audit machinery."""
 
 from jarvis.tools.base import Launcher, Notifier, Risk, Tool, ToolContext, ToolError
+from jarvis.tools.calc import CALC_TOOLS
 from jarvis.tools.files import FILE_TOOLS, resolve_root, safe_path
 from jarvis.tools.notes import NOTE_TOOLS, ReminderScheduler, reminder_rows
 from jarvis.tools.registry import (
@@ -14,7 +15,7 @@ from jarvis.tools.registry import (
 )
 from jarvis.tools.system import SYSTEM_TOOLS, SystemLauncher
 
-ALL_TOOLS = [*FILE_TOOLS, *SYSTEM_TOOLS, *NOTE_TOOLS]
+ALL_TOOLS = [*FILE_TOOLS, *SYSTEM_TOOLS, *NOTE_TOOLS, *CALC_TOOLS]
 
 
 def default_registry() -> ToolRegistry:

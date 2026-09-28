@@ -58,8 +58,11 @@ class PromptBuilder:
     def system_message(self, dropped: int = 0) -> Message:
         parts = [self.system_prompt.strip()]
         if self.include_datetime:
-            now = self.clock().strftime("%A, %d %B %Y, %H:%M %Z")
-            parts.append(f"Current date and time: {now}")
+            # Date only: the prompt prefix then stays identical all day, so Ollama can
+            # reuse its cache instead of re-reading the prompt + tool definitions every
+            # minute. Exact time comes from the system_time tool.
+            today = self.clock().strftime("%A, %d %B %Y")
+            parts.append(f"Today is {today}. For the exact current time, use system_time.")
         if dropped:
             parts.append(
                 f"({dropped} earlier messages in this conversation are not shown due to length.)"

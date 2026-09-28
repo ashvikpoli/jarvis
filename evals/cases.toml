@@ -333,10 +333,23 @@ prompt = "How much RAM am I using right now?"
 checks = { tools_called = ["system_info"] }
 
 [[case]]
-id = "tools-none-math"
+id = "tools-math-simple"
 category = "tools"
+note = "Either mental math or the calculator is fine — it just has to be right."
 prompt = "What's 12 times 12?"
-checks = { no_tools = true, number = 144 }
+checks = { number = 144 }
+
+[[case]]
+id = "tools-math-hard"
+category = "tools"
+prompt = "What's 1234 times 5678?"
+checks = { tools_called = ["calculate"], number = 7006652 }
+
+[[case]]
+id = "tools-math-percent"
+category = "tools"
+prompt = "What's a 18% tip on a 2,450 rupee bill?"
+checks = { number = 441 }
 
 [[case]]
 id = "tools-none-joke"
