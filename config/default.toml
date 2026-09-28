@@ -1,0 +1,30 @@
+# Jarvis default configuration.
+# Don't edit this file for personal settings — create config/local.toml instead
+# (same keys; only include what you want to change). Env vars override both,
+# e.g.  JARVIS_MODELS__ROLES__CHAT="ollama:qwen3:8b"
+
+[app]
+name = "Jarvis"
+data_dir = "data"          # logs, and later: database, memory, cache
+system_prompt = """You are Jarvis, a concise, capable personal assistant running locally on the user's PC. \
+Answer directly and briefly unless asked for detail."""
+
+[logging]
+level = "INFO"             # file log level
+console_level = "WARNING"  # keep the chat window clean
+json_file = true
+
+[models]
+# role -> "<provider>:<model>". Code asks for a role; config decides the model.
+# Pick the chat model after comparing a few on your eval prompts (Phase 1).
+roles = { chat = "ollama:qwen3:14b" }
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434"
+keep_alive = "30m"         # how long the model stays in VRAM after last use
+timeout_s = 120
+# think = false            # for thinking models: false = faster, no reasoning trace
+
+[server]
+host = "127.0.0.1"         # local only. Don't expose to your network without auth.
+port = 8765
