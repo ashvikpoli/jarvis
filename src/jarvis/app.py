@@ -31,6 +31,7 @@ from jarvis.tools import (
     default_registry,
     resolve_root,
 )
+from jarvis.tools.apps import AppCatalog
 from jarvis.tools.notify import LogNotifier, MultiNotifier, default_notifier
 
 log = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ class JarvisApp:
         launcher: Launcher,
         notifier: MultiNotifier,
         file_roots: list[Path],
+        apps: AppCatalog | None = None,
     ):
         self.settings = settings
         self.models = models
@@ -68,6 +70,7 @@ class JarvisApp:
             models, self.store, prompts, loop=self.loop, context_factory=self.tool_context
         )
         self.scheduler = ReminderScheduler(db, notifier)
+        self.apps = apps or AppCatalog()
 
     @classmethod
     def create(
@@ -79,6 +82,7 @@ class JarvisApp:
         launcher: Launcher | None = None,
         notifier: Notifier | None = None,
         file_roots: list[Path] | None = None,
+        apps: AppCatalog | None = None,
     ) -> JarvisApp:
         settings = settings or load_settings()
         if providers is None:
@@ -134,6 +138,7 @@ class JarvisApp:
             launcher=launcher or SystemLauncher(),
             notifier=base_notifier,
             file_roots=file_roots,
+            apps=apps,
         )
 
     def tool_context(self, conversation_id: int | None = None) -> ToolContext:
@@ -144,6 +149,7 @@ class JarvisApp:
             notifier=self.notifier,
             conversation_id=conversation_id,
             max_read_chars=self.settings.tools.files.max_read_chars,
+            apps=self.apps,
         )
 
     async def chat_stream(

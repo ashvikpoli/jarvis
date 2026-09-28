@@ -50,6 +50,7 @@ class ToolContext:
     notifier: Notifier
     conversation_id: int | None = None
     max_read_chars: int = 20_000
+    apps: Any = None  # AppCatalog; None = the shared real one
     clock: Any = field(default=lambda: datetime.now().astimezone())
 
 

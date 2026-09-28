@@ -14,6 +14,7 @@ from pathlib import Path
 
 from jarvis.storage import Database
 from jarvis.tools import ApprovalRequest, ToolContext
+from jarvis.tools.apps import InstalledApp, StaticAppCatalog
 
 FIXTURE_FILES = {
     "Documents/report-q3.txt": "Q3 report\nRevenue up 12% quarter over quarter.\n",
@@ -24,6 +25,16 @@ FIXTURE_FILES = {
     "Downloads/setup-installer.exe": b"MZ\x00\x00",
     "Downloads/holiday-photo.jpg": b"\xff\xd8\xff\x00",
 }
+
+
+SANDBOX_APPS = [
+    InstalledApp("Discord", "shell:AppsFolder\\com.squirrel.Discord.Discord", "store"),
+    InstalledApp("Spotify", "shell:AppsFolder\\SpotifyAB.SpotifyMusic", "store"),
+    InstalledApp("WhatsApp", "shell:AppsFolder\\5319275A.WhatsAppDesktop", "store"),
+    InstalledApp("Google Chrome", "shell:AppsFolder\\Chrome", "store"),
+    InstalledApp("Microsoft Teams", "shell:AppsFolder\\MSTeams", "store"),
+    InstalledApp("Visual Studio Code", "shell:AppsFolder\\Microsoft.VisualStudioCode", "store"),
+]
 
 
 class RecordingLauncher:
@@ -92,5 +103,6 @@ def make_sandbox() -> Sandbox:
         file_roots=[(root / d).resolve() for d in ("Documents", "Desktop", "Downloads")],
         launcher=RecordingLauncher(),
         notifier=RecordingNotifier(),
+        apps=StaticAppCatalog(SANDBOX_APPS),
     )
     return Sandbox(root=root, ctx=ctx)

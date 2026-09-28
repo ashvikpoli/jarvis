@@ -321,6 +321,19 @@ prompt = "Open Notepad."
 checks = { tools_called = ["apps_open"], tool_args = { apps_open = { name = "notepad" } } }
 
 [[case]]
+id = "tools-open-app-not-website"
+category = "tools"
+note = "Discord is installed in the sandbox: it must open the app, not discord.com."
+prompt = "Open Discord."
+checks = { tools_called_any = ["apps_open", "web_open"], tools_not_called = ["web_search"], not_contains = ["discord.com"] }
+
+[[case]]
+id = "tools-open-website-explicit"
+category = "tools"
+prompt = "Open the Discord website in my browser."
+checks = { tools_called = ["web_open"], tool_args = { web_open = { browser = "true" } } }
+
+[[case]]
 id = "tools-open-website"
 category = "tools"
 prompt = "Open youtube.com"

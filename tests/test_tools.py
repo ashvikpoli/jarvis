@@ -6,6 +6,7 @@ import pytest
 
 from jarvis.storage import Database
 from jarvis.tools import ReminderScheduler, ToolContext, ToolError, reminder_rows, resolve_root
+from jarvis.tools.apps import InstalledApp, StaticAppCatalog
 from jarvis.tools.base import NoArgs
 from jarvis.tools.files import (
     DeleteArgs,
@@ -174,33 +175,89 @@ async def test_mkdir_move_delete(ctx, roots, monkeypatch):
 # ------------------------------------------------------------------ apps / web / system
 
 
-async def test_apps_and_web_use_launcher(ctx, monkeypatch):
-    await AppsOpen().run(AppArgs(name="Notepad"), ctx)
-    assert ctx.launcher.opened == ["notepad.exe"]
+APPS = [
+    InstalledApp("Discord", r"shell:AppsFolder\com.squirrel.Discord.Discord", "store"),
+    InstalledApp("Spotify", r"shell:AppsFolder\SpotifyAB.SpotifyMusic", "store"),
+    InstalledApp("WhatsApp", r"shell:AppsFolder\5319275A.WhatsAppDesktop", "store"),
+    InstalledApp("Google Chrome", r"shell:AppsFolder\Chrome", "store"),
+    InstalledApp("Microsoft Teams", r"shell:AppsFolder\MSTeams", "store"),
+    InstalledApp("Visual Studio Code", r"shell:AppsFolder\VSCode", "store"),
+    InstalledApp("Uninstall Spotify", r"C:\x\unins.lnk", "shortcut"),
+]
 
-    from jarvis.tools import system
 
-    monkeypatch.setattr(
-        system,
-        "start_menu_shortcuts",
-        lambda: {
-            "spotify": system.Path("C:/x/Spotify.lnk"),
-            "visual studio code": system.Path("C:/x/Visual Studio Code.lnk"),
-        },
-    )
-    await AppsOpen().run(AppArgs(name="spotfy"), ctx)  # typo → fuzzy match
-    await AppsOpen().run(AppArgs(name="studio"), ctx)  # substring
-    assert ctx.launcher.opened[1].endswith("Spotify.lnk")
-    assert ctx.launcher.opened[2].endswith("Visual Studio Code.lnk")
-    with pytest.raises(ToolError, match="couldn't find"):
-        await AppsOpen().run(AppArgs(name="photoshop"), ctx)
+@pytest.fixture
+def app_ctx(ctx):
+    ctx.apps = StaticAppCatalog(APPS)
+    return ctx
 
-    await WebOpen().run(UrlArgs(url="youtube.com"), ctx)
-    assert ctx.launcher.opened[-1] == "https://youtube.com"
+
+def test_app_matching():
+    cat = StaticAppCatalog(APPS)
+    assert cat.find("discord").name == "Discord"
+    assert cat.find("Discord app").name == "Discord"
+    assert cat.find("spotfy").name == "Spotify"  # typo
+    assert cat.find("teams").name == "Microsoft Teams"  # whole word
+    assert cat.find("vs code") is None or cat.find("vs code").name == "Visual Studio Code"
+    assert cat.find("visual studio").name == "Visual Studio Code"
+    assert cat.find("notepad").source == "builtin"
+    assert cat.find("photoshop") is None
+    assert all("Uninstall" not in a.name for a in cat.apps())
+
+
+@pytest.mark.parametrize(
+    "url,app",
+    [
+        ("discord.com", "Discord"),
+        ("https://www.discord.com/channels/@me", "Discord"),
+        ("open.spotify.com", "Spotify"),
+        ("web.whatsapp.com", "WhatsApp"),
+        ("teams.microsoft.com", "Microsoft Teams"),
+        ("google.com", None),  # platform domain, and never redirect to a browser
+        ("youtube.com", None),
+        ("bbc.co.uk", None),
+    ],
+)
+def test_site_to_app(url, app):
+    found = StaticAppCatalog(APPS).find_for_site(url)
+    assert (found.name if found else None) == app
+
+
+async def test_open_prefers_installed_app(app_ctx):
+    opened = app_ctx.launcher.opened
+    out = await AppsOpen().run(AppArgs(name="Discord"), app_ctx)
+    assert opened[-1].endswith("Discord.Discord") and "Discord app" in out
+
+    # the bug report: "open discord" went to the website. web_open now redirects too.
+    out = await WebOpen().run(UrlArgs(url="discord.com"), app_ctx)
+    assert opened[-1].endswith("Discord.Discord") and "instead of the website" in out
+
+    # ...unless the website was explicitly requested
+    await WebOpen().run(UrlArgs(url="discord.com", browser=True), app_ctx)
+    assert opened[-1] == "https://discord.com"
+
+    await WebOpen().run(UrlArgs(url="youtube.com"), app_ctx)  # no app → browser
+    assert opened[-1] == "https://youtube.com"
+
+    await AppsOpen().run(AppArgs(name="Notepad"), app_ctx)
+    assert opened[-1] == "notepad.exe"
+    with pytest.raises(ToolError, match="doesn't seem to be installed"):
+        await AppsOpen().run(AppArgs(name="photoshop"), app_ctx)
     with pytest.raises(ToolError):
-        await WebOpen().run(UrlArgs(url="file:///C:/Windows/system32/cmd.exe"), ctx)
-    await WebSearch().run(WebSearchArgs(query="best pizza near me"), ctx)
-    assert ctx.launcher.opened[-1].endswith("q=best+pizza+near+me")
+        await WebOpen().run(UrlArgs(url="file:///C:/Windows/system32/cmd.exe"), app_ctx)
+    await WebSearch().run(WebSearchArgs(query="best pizza near me"), app_ctx)
+    assert opened[-1].endswith("q=best+pizza+near+me")
+
+
+def test_catalog_skips_scan_off_windows_and_caches(monkeypatch):
+    from jarvis.tools.apps import AppCatalog
+
+    calls = []
+    cat = AppCatalog()
+    monkeypatch.setattr(cat, "_scan", lambda: calls.append(1) or APPS)
+    cat.apps()
+    cat.apps()
+    assert len(calls) == 1
 
 
 async def test_system_time_and_info(ctx):

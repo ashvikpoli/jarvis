@@ -213,6 +213,7 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
             )
         )
         app.scheduler.start()
+        app.apps.prefetch()  # so the first "open X" doesn't wait for the app scan
 
         while True:
             try:
@@ -408,6 +409,40 @@ def cmd_reminders(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_apps(settings: Settings, args: argparse.Namespace) -> int:
+    app = JarvisApp.create(settings)
+    with console.status("Scanning installed apps..."):
+        apps = app.apps.apps()
+    if args.query:
+        match = app.apps.find(args.query)
+        site = app.apps.find_for_site(args.query) if "." in args.query else None
+        console.print(
+            f"“open {args.query}” → "
+            + (
+                f"[green]{match.name}[/] [dim]({match.source}: {match.target})[/]"
+                if match
+                else "[yellow]no installed app[/]"
+            ),
+            highlight=False,
+        )
+        if "." in args.query:
+            console.print(
+                f"website {args.query} → "
+                + (
+                    f"[green]opens the {site.name} app[/]"
+                    if site
+                    else "[dim]opens in the browser[/]"
+                ),
+                highlight=False,
+            )
+    else:
+        for a in sorted(apps, key=lambda a: a.name.lower()):
+            console.print(f"  {a.name}  [dim]{a.source}[/]", highlight=False)
+        console.print(f"\n[dim]{len(apps)} apps found. Try: jarvis apps discord[/]")
+    asyncio.run(app.aclose())
+    return 0
+
+
 def cmd_notify(settings: Settings, args: argparse.Namespace) -> int:
     app = JarvisApp.create(settings)
     app.notifier.notify("Jarvis", args.text)
@@ -594,6 +629,10 @@ def build_parser() -> argparse.ArgumentParser:
     a = sub.add_parser("audit", help="recent tool calls")
     a.add_argument("--limit", type=int, default=30)
     sub.add_parser("reminders", help="upcoming reminders")
+    ap = sub.add_parser(
+        "apps", help="installed apps Jarvis can open (or test one: jarvis apps discord)"
+    )
+    ap.add_argument("query", nargs="?")
     n = sub.add_parser("notify", help="send a test notification")
     n.add_argument("text", nargs="?", default="Hello from Jarvis 👋")
 
@@ -617,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
         "tools": cmd_tools,
         "audit": cmd_audit,
         "reminders": cmd_reminders,
+        "apps": cmd_apps,
         "notify": cmd_notify,
     }
     return handlers[args.command](settings, args)

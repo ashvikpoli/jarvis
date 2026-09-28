@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import difflib
+import asyncio
 import os
 import platform
 import shutil
@@ -15,25 +15,8 @@ from urllib.parse import quote_plus, urlparse
 
 from pydantic import BaseModel, Field
 
+from jarvis.tools.apps import AppCatalog
 from jarvis.tools.base import Risk, Tool, ToolContext, ToolError
-
-# Friendly names → what to launch. Checked before Start Menu shortcuts.
-APP_ALIASES = {
-    "notepad": "notepad.exe",
-    "calculator": "calc.exe",
-    "calc": "calc.exe",
-    "paint": "mspaint.exe",
-    "file explorer": "explorer.exe",
-    "explorer": "explorer.exe",
-    "files": "explorer.exe",
-    "task manager": "taskmgr.exe",
-    "settings": "ms-settings:",
-    "windows settings": "ms-settings:",
-    "snipping tool": "ms-screenclip:",
-    "camera": "microsoft.windows.camera:",
-    "clock": "ms-clock:",
-    "store": "ms-windows-store:",
-}
 
 
 class SystemLauncher:
@@ -49,30 +32,24 @@ class SystemLauncher:
             subprocess.Popen([opener, target])  # noqa: S603
 
 
-def start_menu_shortcuts() -> dict[str, Path]:
-    """Installed apps, from Start Menu .lnk files (user + all users)."""
-    dirs = []
-    if appdata := os.environ.get("APPDATA"):
-        dirs.append(Path(appdata) / "Microsoft/Windows/Start Menu/Programs")
-    if programdata := os.environ.get("PROGRAMDATA"):
-        dirs.append(Path(programdata) / "Microsoft/Windows/Start Menu/Programs")
-    found: dict[str, Path] = {}
-    for d in dirs:
-        if d.is_dir():
-            for lnk in d.rglob("*.lnk"):
-                name = lnk.stem
-                if "uninstall" not in name.lower():
-                    found.setdefault(name.lower(), lnk)
-    return found
+_DEFAULT_CATALOG = AppCatalog()
+
+
+def catalog(ctx: ToolContext) -> AppCatalog:
+    return ctx.apps or _DEFAULT_CATALOG
 
 
 class AppArgs(BaseModel):
-    name: str = Field(description="App name, e.g. 'Notepad', 'Spotify', 'Visual Studio Code'.")
+    name: str = Field(description="App name, e.g. 'Discord', 'Spotify', 'Visual Studio Code'.")
 
 
 class AppsOpen(Tool):
     name = "apps_open"
-    description = "Open an installed app by name (Start Menu apps and common Windows apps)."
+    description = (
+        "Open an installed app by name. Use this whenever the user says 'open <something>' "
+        "for an app or service (Discord, Spotify, WhatsApp, Word, Steam...) — prefer it "
+        "over web_open unless they explicitly ask for the website."
+    )
     risk = Risk.CHANGE
     Args = AppArgs
 
@@ -80,23 +57,17 @@ class AppsOpen(Tool):
         return f"open the app “{args.name}”"
 
     async def run(self, args: AppArgs, ctx: ToolContext):
-        key = args.name.strip().lower()
-        if key in APP_ALIASES:
-            ctx.launcher.open(APP_ALIASES[key])
-            return f"Opened {args.name}."
-        shortcuts = start_menu_shortcuts()
-        if not shortcuts and sys.platform != "win32":
-            raise ToolError("Opening apps by name only works on Windows.")
-        match = shortcuts.get(key)
-        if match is None:
-            close = difflib.get_close_matches(key, list(shortcuts), n=1, cutoff=0.6)
-            contains = [n for n in shortcuts if key in n]
-            pick = close[0] if close else (min(contains, key=len) if contains else None)
-            if pick is None:
-                raise ToolError(f"I couldn't find an app called “{args.name}”.")
-            match = shortcuts[pick]
-        ctx.launcher.open(str(match))
-        return f"Opened {match.stem}."
+        cat = catalog(ctx)
+        app = await asyncio.to_thread(cat.find, args.name)
+        if app is None:
+            if sys.platform != "win32" and ctx.apps is None:
+                raise ToolError("Opening apps by name only works on Windows.")
+            raise ToolError(
+                f"“{args.name}” doesn't seem to be installed. If the user wants, you can "
+                "open its website with web_open instead."
+            )
+        ctx.launcher.open(app.target)
+        return f"Opened the {app.name} app."
 
 
 class AppsListArgs(BaseModel):
@@ -105,12 +76,13 @@ class AppsListArgs(BaseModel):
 
 class AppsList(Tool):
     name = "apps_list"
-    description = "List installed apps (from the Start Menu), optionally filtered."
+    description = "List installed apps, optionally filtered by name."
     risk = Risk.SAFE
     Args = AppsListArgs
 
     async def run(self, args: AppsListArgs, ctx: ToolContext):
-        names = sorted({p.stem for p in start_menu_shortcuts().values()}, key=str.lower)
+        apps = await asyncio.to_thread(catalog(ctx).apps)
+        names = sorted({a.name for a in apps}, key=str.lower)
         if args.query:
             names = [n for n in names if args.query.lower() in n.lower()]
         return {"apps": names[:150], "total": len(names)}
@@ -118,16 +90,24 @@ class AppsList(Tool):
 
 class UrlArgs(BaseModel):
     url: str = Field(description="Web address, e.g. 'youtube.com' or 'https://example.com'.")
+    browser: bool = Field(
+        False,
+        description="Set true ONLY if the user explicitly asked for the website or browser. "
+        "Otherwise, if a matching app is installed (e.g. Discord), the app opens instead.",
+    )
 
 
 class WebOpen(Tool):
     name = "web_open"
-    description = "Open a website in the default browser."
+    description = (
+        "Open a website. If the site has an installed app (Discord, Spotify, Slack...) the "
+        "app opens instead, unless browser=true."
+    )
     risk = Risk.CHANGE
     Args = UrlArgs
 
     def describe(self, args: UrlArgs) -> str:
-        return f"open {args.url} in your browser"
+        return f"open {args.url}" + (" in your browser" if args.browser else "")
 
     async def run(self, args: UrlArgs, ctx: ToolContext):
         url = args.url.strip()
@@ -136,8 +116,16 @@ class WebOpen(Tool):
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ToolError("I can only open http(s) web addresses.")
+        if not args.browser:
+            app = await asyncio.to_thread(catalog(ctx).find_for_site, url)
+            if app is not None:
+                ctx.launcher.open(app.target)
+                return (
+                    f"Opened the installed {app.name} app instead of the website. "
+                    "(If the user wanted the website, call web_open again with browser=true.)"
+                )
         ctx.launcher.open(url)
-        return f"Opened {url}"
+        return f"Opened {url} in the browser."
 
 
 class SearchArgs(BaseModel):

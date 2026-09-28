@@ -7,6 +7,7 @@ websites, check your PC's status, and keep notes and reminders — every action 
 through a permission check and is recorded in an audit log. Built on Phase 1's
 saved, resumable conversations and eval harness.
 Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md).
+Full test checklist: [docs/testing.md](docs/testing.md).
 
 ## Setup (Windows, native — not WSL)
 
@@ -46,6 +47,7 @@ uv run jarvis eval --models ollama:qwen3:14b,ollama:qwen3:8b   # compare models
 uv run jarvis tools                         # what Jarvis can do + what needs your OK
 uv run jarvis audit                         # every tool call Jarvis has made
 uv run jarvis reminders                     # upcoming reminders
+uv run jarvis apps [name]                   # installed apps Jarvis can open
 uv run jarvis notify                        # test Windows notifications
 uv run jarvis serve                         # HTTP API on http://127.0.0.1:8765/docs
 uv run jarvis doctor                        # diagnose setup, VRAM fit, latency
@@ -70,7 +72,7 @@ curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
 
 Try: *"what's in my Downloads folder?"*, *"find my tax receipt"*, *"create
 shopping.txt on my Desktop with milk and eggs"*, *"open Spotify"*, *"open
-youtube.com"*, *"how much RAM am I using?"*, *"note that the plumber's number is
+youtube.com"* (opens the app instead if one is installed, unless you say "website"), *"how much RAM am I using?"*, *"note that the plumber's number is
 555-0142"*, *"remind me in 10 minutes to stretch"* → *"actually make it 20"*.
 
 | Permission | Tools |

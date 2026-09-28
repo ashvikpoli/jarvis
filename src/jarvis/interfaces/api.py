@@ -97,6 +97,7 @@ def create_api(settings: Settings | None = None, jarvis: JarvisApp | None = None
         api.state.jarvis = jarvis or JarvisApp.create(settings or load_settings())
         if owned:
             api.state.jarvis.scheduler.start()  # reminders fire while the server runs
+            api.state.jarvis.apps.prefetch()
         yield
         if owned:
             await api.state.jarvis.aclose()
