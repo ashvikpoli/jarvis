@@ -15,8 +15,11 @@ from rich.console import Console
 from rich.table import Table
 
 from jarvis.core.types import Message, ToolCall
-from jarvis.evals.cases import EvalCase, clean_reply, run_checks
-from jarvis.evals.sandbox import make_sandbox
+from jarvis.evals.cases import EvalCase, clean_reply, run_checks, run_memory_checks
+from jarvis.evals.sandbox import SANDBOX_MEMORIES, make_sandbox
+from jarvis.memory.extractor import MemoryExtractor
+from jarvis.memory.service import MemoryService
+from jarvis.memory.store import MemoryStore
 from jarvis.providers import ProviderError
 
 if TYPE_CHECKING:
@@ -79,14 +82,60 @@ class EvalRunner:
         self.app = app
         self.console = console or Console(quiet=True)
 
+    async def _sandbox_memory(self, box, case: EvalCase) -> MemoryService:
+        """Memory for the sandbox: its own store, the app's embedding model."""
+        m = self.app.memory
+        svc = MemoryService(
+            MemoryStore(box.ctx.db),
+            m.embedder,
+            top_k=m.top_k,
+            min_score=m.min_score,
+            core_limit=m.core_limit,
+            dedupe_threshold=m.dedupe_threshold,
+        )
+        seeds = (
+            SANDBOX_MEMORIES
+            if case.memories == "default"
+            else [s.model_dump() for s in case.memories]
+        )
+        for seed in seeds:
+            await svc.save(seed["text"], category=seed.get("category", "other"))
+        box.ctx.memory = svc
+        return svc
+
+    async def run_extract_case(self, case: EvalCase) -> CaseResult:
+        """Test only the learner: what would Jarvis remember from this message?"""
+        box = make_sandbox()
+        try:
+            svc = await self._sandbox_memory(box, case)
+            extractor = MemoryExtractor(self.app.models, svc, role=EVAL_ROLE)
+            changes = await extractor.extract(case.prompt, case.history)
+        except ProviderError as e:
+            return CaseResult(case.id, case.category, False, ["error"], "", error=str(e))
+        finally:
+            box.close()
+        failures = run_memory_checks(changes, case.checks)
+        summary = "; ".join(f"{c.op}: {c.text}" for c in changes) or "(learned nothing)"
+        return CaseResult(
+            case.id,
+            case.category,
+            not failures,
+            failures,
+            summary,
+            tool_calls=[f"{c.op} #{c.id}" for c in changes],
+        )
+
     async def run_case(self, case: EvalCase, options: dict[str, Any] | None) -> CaseResult:
         """Run one case with tools available, inside a throwaway sandbox."""
+        if case.kind == "extract":
+            return await self.run_extract_case(case)
         messages = [*case.history, Message.user(case.prompt)]
         parts: list[str] = []
         calls: list[ToolCall] = []
         usage = None
         box = make_sandbox()
         try:
+            await self._sandbox_memory(box, case)
             stream = self.app.agent_stream(
                 messages, box.ctx, box.approver, role=EVAL_ROLE, options=options
             )

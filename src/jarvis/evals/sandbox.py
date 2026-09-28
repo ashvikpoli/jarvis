@@ -38,6 +38,16 @@ SANDBOX_APPS = [
 ]
 
 
+SANDBOX_MEMORIES = [
+    {"text": "User's name is Adi.", "category": "profile"},
+    {"text": "User runs an e-commerce company called Exinent.", "category": "profile"},
+    {"text": "User lives in Hyderabad.", "category": "profile"},
+    {"text": "User's sister is named Priya.", "category": "person"},
+    {"text": "User prefers short, direct answers.", "category": "preference"},
+    {"text": "User is building a voice assistant called Jarvis.", "category": "project"},
+]
+
+
 class RecordingLauncher:
     def __init__(self):
         self.opened: list[str] = []

@@ -15,6 +15,7 @@ from jarvis.app import JarvisApp
 from jarvis.conversation import ConversationNotFound
 from jarvis.core.config import Settings, load_settings
 from jarvis.core.types import Message, StreamChunk, Usage
+from jarvis.memory.store import Memory
 from jarvis.providers import ProviderError
 from jarvis.storage import Conversation, StoredMessage
 
@@ -37,6 +38,15 @@ class NewConversation(BaseModel):
 class SendMessage(BaseModel):
     content: str
     stream: bool = True
+
+
+class NewMemory(BaseModel):
+    text: str
+    category: str = "other"
+
+
+class EditMemory(BaseModel):
+    text: str
 
 
 class ConversationDetail(BaseModel):
@@ -191,6 +201,29 @@ def create_api(settings: Settings | None = None, jarvis: JarvisApp | None = None
     @api.get("/v1/audit")
     async def audit(request: Request, limit: int = 50):
         return get_jarvis(request).audit.recent(limit)
+
+    # ------------------------------------------------------------ memory
+
+    @api.get("/v1/memories", response_model=list[Memory])
+    async def list_memories(request: Request):
+        return get_jarvis(request).memory_store.list()
+
+    @api.post("/v1/memories", response_model=Memory, status_code=201)
+    async def add_memory(body: NewMemory, request: Request):
+        mem, _ = await get_jarvis(request).memory.save(body.text, category=body.category)
+        return mem
+
+    @api.patch("/v1/memories/{memory_id}", response_model=Memory)
+    async def edit_memory(memory_id: int, body: EditMemory, request: Request):
+        mem = await get_jarvis(request).memory.update(memory_id, body.text)
+        if mem is None:
+            raise HTTPException(404, f"No memory #{memory_id}")
+        return mem
+
+    @api.delete("/v1/memories/{memory_id}", status_code=204)
+    async def delete_memory(memory_id: int, request: Request):
+        if not get_jarvis(request).memory.forget(memory_id):
+            raise HTTPException(404, f"No memory #{memory_id}")
 
     @api.post("/v1/conversations/{conversation_id}/messages")
     async def send_message(conversation_id: int, body: SendMessage, request: Request):

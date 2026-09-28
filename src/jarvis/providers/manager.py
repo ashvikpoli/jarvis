@@ -98,6 +98,10 @@ class ModelManager:
                 )
             yield chunk
 
+    async def embed(self, texts: Sequence[str], role: str = "embed") -> list[list[float]]:
+        provider, model = self.resolve(role)
+        return await provider.embed(list(texts), model)
+
     async def warmup(self, role: str = "chat") -> None:
         # Same options as chat, so e.g. num_ctx matches and Ollama doesn't reload.
         provider, model = self.resolve(role)

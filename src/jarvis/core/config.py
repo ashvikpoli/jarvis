@@ -26,7 +26,9 @@ class LoggingSettings(BaseModel):
 
 
 class ModelsSettings(BaseModel):
-    roles: dict[str, str] = Field(default_factory=lambda: {"chat": "ollama:qwen3:8b"})
+    roles: dict[str, str] = Field(
+        default_factory=lambda: {"chat": "ollama:qwen3:8b", "embed": "ollama:qwen3-embedding:0.6b"}
+    )
     # Per-role generation options, e.g. {"chat": {"think": False, "temperature": 0.7}}
     options: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
@@ -47,6 +49,9 @@ DEFAULT_PERMISSION_OVERRIDES = {
     "web_open": "allow",
     "web_search": "allow",
     "files_open": "allow",
+    "memory_save": "allow",
+    "memory_update": "allow",
+    "memory_forget": "allow",
 }
 
 
@@ -122,6 +127,16 @@ class ToolsSettings(BaseModel):
     notifications: bool = True
 
 
+class MemorySettings(BaseModel):
+    enabled: bool = True
+    auto_learn: bool = True  # learn facts from conversation in the background
+    top_k: int = 5  # memories recalled per message
+    min_score: float = 0.5  # similarity needed to recall (0..1)
+    core_limit: int = 15  # "profile" memories always included
+    dedupe_threshold: float = 0.9  # saving something this similar updates instead
+    query_prefix: str | None = None  # embedding instruction; None = model default
+
+
 class OllamaSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
     keep_alive: str = "30m"
@@ -187,6 +202,7 @@ class Settings(BaseSettings):
     models: ModelsSettings = Field(default_factory=ModelsSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 

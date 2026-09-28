@@ -396,3 +396,155 @@ history = [
 ]
 prompt = "Sorry, I meant Thursday, same time."
 checks = { tools_called = ["reminders_update"], tools_not_called = ["reminders_set"] }
+
+# ------------------------------------------------------------------ memory (using it)
+# memories = "default" seeds: name Adi, company Exinent, lives in Hyderabad,
+# sister Priya, prefers short answers, building Jarvis.
+
+[[case]]
+id = "memory-name"
+category = "memory"
+memories = "default"
+prompt = "What's my name?"
+checks = { contains_all = ["Adi"] }
+
+[[case]]
+id = "memory-company"
+category = "memory"
+memories = "default"
+prompt = "What's the name of my company again?"
+checks = { contains_all = ["Exinent"] }
+
+[[case]]
+id = "memory-person"
+category = "memory"
+memories = "default"
+prompt = "Who is Priya?"
+checks = { contains_any = ["sister"] }
+
+[[case]]
+id = "memory-list"
+category = "memory"
+memories = "default"
+prompt = "What do you remember about me?"
+checks = { contains_all = ["Adi", "Exinent"] }
+
+[[case]]
+id = "memory-save"
+category = "memory"
+memories = "default"
+prompt = "Remember that my favourite cricket team is Sunrisers Hyderabad."
+checks = { tools_called = ["memory_save"], tool_args = { memory_save = { text = "Sunrisers" } } }
+
+[[case]]
+id = "memory-forget"
+category = "memory"
+memories = "default"
+prompt = "Please forget that I have a sister."
+checks = { tools_called_any = ["memory_forget"] }
+
+[[case]]
+id = "memory-no-recite"
+category = "memory"
+memories = "default"
+note = "Memories shouldn't leak into unrelated answers."
+prompt = "What's 15 times 4?"
+checks = { number = 60, not_contains = ["Priya", "Exinent", "Hyderabad"] }
+
+[[case]]
+id = "memory-honest-unknown"
+category = "memory"
+memories = "default"
+prompt = "What's my wife's name?"
+checks = { contains_any = ["don't know", "do not know", "don't have", "haven't told", "not sure", "no record", "don't remember", "didn't tell", "haven't mentioned", "not mentioned"], not_contains = ["Priya"] }
+
+# ------------------------------------------------------------------ memory (learning)
+# kind = "extract": runs only the learner on the message and checks what it saved.
+
+[[case]]
+id = "learn-name"
+category = "memory-extract"
+kind = "extract"
+prompt = "Hi, I'm Adi by the way."
+checks = { memories_any = ["Adi"] }
+
+[[case]]
+id = "learn-company"
+category = "memory-extract"
+kind = "extract"
+prompt = "I run an e-commerce agency called Exinent out of North Carolina."
+checks = { memories_any = ["Exinent"] }
+
+[[case]]
+id = "learn-person"
+category = "memory-extract"
+kind = "extract"
+prompt = "My brother Rohan just moved to Toronto for work."
+checks = { memories_any = ["Rohan"] }
+
+[[case]]
+id = "learn-preference"
+category = "memory-extract"
+kind = "extract"
+prompt = "Honestly I prefer short answers, not long essays."
+checks = { memories_any = ["short", "brief", "concise"] }
+
+[[case]]
+id = "learn-skip-task"
+category = "memory-extract"
+kind = "extract"
+prompt = "Can you help me write an email to my landlord?"
+checks = { memories_none = true }
+
+[[case]]
+id = "learn-skip-transient"
+category = "memory-extract"
+kind = "extract"
+prompt = "I'm so tired today, it was a long day."
+checks = { memories_none = true }
+
+[[case]]
+id = "learn-skip-question"
+category = "memory-extract"
+kind = "extract"
+prompt = "Do you think I should learn Rust?"
+checks = { memories_none = true }
+
+[[case]]
+id = "learn-no-secrets"
+category = "memory-extract"
+kind = "extract"
+prompt = "My wifi password is lemonade42, keep it somewhere."
+checks = { memories_not = ["lemonade42"] }
+
+[[case]]
+id = "learn-update"
+category = "memory-extract"
+kind = "extract"
+memories = [ { text = "User lives in Hyderabad.", category = "profile" } ]
+prompt = "I moved to Bangalore last month."
+checks = { ops_any = ["update"], memories_any = ["Bangalore"] }
+
+[[case]]
+id = "learn-no-duplicate"
+category = "memory-extract"
+kind = "extract"
+memories = [ { text = "User's name is Adi.", category = "profile" } ]
+prompt = "My name is Adi."
+checks = { ops_not = ["add"] }
+
+[[case]]
+id = "learn-forget"
+category = "memory-extract"
+kind = "extract"
+memories = [ { text = "User has a brother named Rohan.", category = "person" } ]
+prompt = "Please forget about my brother, we don't talk anymore."
+checks = { ops_any = ["delete"] }
+
+[[case]]
+id = "learn-skip-assistant-words"
+category = "memory-extract"
+kind = "extract"
+history = [ { role = "assistant", content = "You might enjoy hiking in the Western Ghats this weekend." } ]
+prompt = "Maybe, I'll think about it."
+checks = { memories_none = true }

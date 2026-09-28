@@ -55,8 +55,10 @@ class PromptBuilder:
     def tokens_for_tools(self, specs: list[dict] | None) -> int:
         return self.estimator(json.dumps(specs)) if specs else 0
 
-    def system_message(self, dropped: int = 0) -> Message:
+    def system_message(self, dropped: int = 0, extra: str | None = None) -> Message:
         parts = [self.system_prompt.strip()]
+        if extra:
+            parts.append(extra.strip())
         if self.include_datetime:
             # Date only: the prompt prefix then stays identical all day, so Ollama can
             # reuse its cache instead of re-reading the prompt + tool definitions every
@@ -69,7 +71,13 @@ class PromptBuilder:
             )
         return Message.system("\n\n".join(parts))
 
-    def build(self, history: Sequence[Message], *, extra_tokens: int = 0) -> BuiltPrompt:
+    def build(
+        self,
+        history: Sequence[Message],
+        *,
+        extra_tokens: int = 0,
+        system_extra: str | None = None,
+    ) -> BuiltPrompt:
         """Fit history into the budget, newest first. The last message is always kept.
 
         A leading system message in `history` replaces the configured system prompt
@@ -83,7 +91,7 @@ class PromptBuilder:
 
         # Reserve a little for the "N messages omitted" note in case we need it.
         budget = self.context_tokens - self.reserve_tokens - extra_tokens - 30
-        system = system_override or self.system_message()
+        system = system_override or self.system_message(extra=system_extra)
         budget -= self._cost(system)
 
         kept: list[Message] = []
@@ -100,7 +108,7 @@ class PromptBuilder:
         dropped = len(history) - len(kept)
 
         if dropped and system_override is None:
-            system = self.system_message(dropped)
+            system = self.system_message(dropped, extra=system_extra)
         messages = [system, *kept]
         return BuiltPrompt(
             messages=messages,

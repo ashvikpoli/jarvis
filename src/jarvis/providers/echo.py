@@ -49,6 +49,11 @@ class EchoProvider(ModelProvider):
             ),
         )
 
+    async def embed(self, texts: Sequence[str], model: str) -> list[list[float]]:
+        from jarvis.memory.vectors import toy_embed
+
+        return [toy_embed(t) for t in texts]
+
     async def list_models(self) -> list[str]:
         return ["echo"]
 

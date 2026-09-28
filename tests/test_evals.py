@@ -156,3 +156,67 @@ async def test_runner_uses_sandboxed_tools(tmp_path):
     assert r.tool_calls[0].startswith("files_read")
     # the tool really read the sandbox fixture, not the user's disk
     assert "buy milk" in provider.calls[1]["messages"][-1].content
+
+
+async def test_runner_memory_cases(tmp_path):
+    import json as _json
+
+    from jarvis.evals.cases import SeedMemory
+    from jarvis.providers.scripted import ScriptedProvider
+
+    (tmp_path / "default.toml").write_text(
+        '[models]\nroles = { chat = "scripted:main", embed = "scripted:emb" }\n'
+    )
+    provider = ScriptedProvider(
+        [
+            "Your name is Adi.",
+            _json.dumps(
+                {
+                    "operations": [
+                        {
+                            "op": "update",
+                            "id": 1,
+                            "text": "User lives in Bangalore.",
+                            "category": "profile",
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    app = JarvisApp.create(
+        load_settings(tmp_path), providers={"scripted": provider}, db_path=":memory:", file_roots=[]
+    )
+    runner = EvalRunner(app)
+    chat = EvalCase(
+        id="m",
+        category="memory",
+        prompt="What's my name?",
+        memories="default",
+        checks=Checks(contains_all=["Adi"]),
+    )
+    learn = EvalCase(
+        id="l",
+        category="memory-extract",
+        kind="extract",
+        prompt="I moved to Bangalore last month.",
+        memories=[SeedMemory(text="User lives in Hyderabad.", category="profile")],
+        checks=Checks(ops_any=["update"], memories_any=["Bangalore"]),
+    )
+    skip = EvalCase(
+        id="s",
+        category="memory-extract",
+        kind="extract",
+        prompt="What's the weather on Mars?",
+        checks=Checks(memories_none=True),
+    )
+    result = await runner.run_model("scripted:main", [chat, learn, skip])
+    real_store_count = app.memory_store.count()
+    await app.aclose()
+    assert [c.passed for c in result.cases] == [True, True, True], [
+        c.failures for c in result.cases
+    ]
+    # seeded memories reached the model; the user's real memory store wasn't touched
+    assert "User's name is Adi" in provider.calls[0]["messages"][0].content
+    assert real_store_count == 0
+    assert result.cases[1].reply == "update: User lives in Bangalore."

@@ -69,6 +69,7 @@ class ToolContext:
     max_read_chars: int = 20_000
     apps: Any = None  # AppCatalog; None = the shared real one
     files: FilePolicy = field(default_factory=FilePolicy)
+    memory: Any = None  # MemoryService; None = memory off
     clock: Any = field(default=lambda: datetime.now().astimezone())
 
 

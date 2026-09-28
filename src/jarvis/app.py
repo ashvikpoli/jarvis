@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,16 @@ from jarvis.agent import AgentLoop
 from jarvis.conversation import ConversationManager, PromptBuilder
 from jarvis.core.config import Settings, load_settings
 from jarvis.core.types import Message, StreamChunk
-from jarvis.providers import EchoProvider, ModelManager, ModelProvider, OllamaProvider
+from jarvis.memory.extractor import Change, MemoryExtractor, MemoryWorker
+from jarvis.memory.service import Embedder, MemoryService
+from jarvis.memory.store import MemoryStore
+from jarvis.providers import (
+    EchoProvider,
+    ModelManager,
+    ModelProvider,
+    OllamaProvider,
+    ProviderError,
+)
 from jarvis.storage import ConversationStore, Database
 from jarvis.tools import (
     Approver,
@@ -38,6 +47,8 @@ from jarvis.tools.notify import LogNotifier, MultiNotifier, default_notifier
 
 log = logging.getLogger(__name__)
 
+DEFAULT_EMBED_MODEL = "ollama:qwen3-embedding:0.6b"
+
 
 class JarvisApp:
     def __init__(
@@ -54,6 +65,7 @@ class JarvisApp:
         file_roots: list[Path],
         apps: AppCatalog | None = None,
         file_policy: FilePolicy | None = None,
+        provider_factory: Callable[[], Mapping[str, ModelProvider]] | None = None,
     ):
         self.settings = settings
         self.models = models
@@ -69,8 +81,22 @@ class JarvisApp:
         self.loop = AgentLoop(
             models, registry, policy, self.audit, max_steps=settings.tools.max_steps
         )
+        # ---- long-term memory
+        mcfg = settings.memory
+        self.memory_store = MemoryStore(db)
+        self.memory = self._memory_service(models)
+        self.memory.enabled = mcfg.enabled
+        self.memory_listeners: list[Callable[[list[Change]], None]] = []
+        self._provider_factory = provider_factory
+        self.memory_worker = MemoryWorker(self._make_extractor, self._memory_changed)
+
         self.conversations = ConversationManager(
-            models, self.store, prompts, loop=self.loop, context_factory=self.tool_context
+            models,
+            self.store,
+            prompts,
+            loop=self.loop,
+            context_factory=self.tool_context,
+            after_turn=self.learn,
         )
         self.scheduler = ReminderScheduler(db, notifier)
         self.apps = apps or AppCatalog()
@@ -90,13 +116,23 @@ class JarvisApp:
     ) -> JarvisApp:
         settings = settings or load_settings()
         if providers is None:
-            providers = {
-                "ollama": OllamaProvider(settings.providers.ollama),
-                "echo": EchoProvider(),
-            }
+
+            def provider_factory() -> dict[str, ModelProvider]:
+                return {"ollama": OllamaProvider(settings.providers.ollama), "echo": EchoProvider()}
+
+            providers = provider_factory()
+        else:
+            fixed = providers
+
+            def provider_factory() -> Mapping[str, ModelProvider]:
+                return fixed
+
+        roles = dict(settings.models.roles)
+        roles.setdefault("embed", DEFAULT_EMBED_MODEL)
+        roles.setdefault("memory", roles["chat"])  # same model → no VRAM swap
         models = ModelManager(
             providers,
-            settings.models.roles,
+            roles,
             role_options=settings.models.options,
             default_options={"num_ctx": settings.conversation.context_tokens},
         )
@@ -164,7 +200,54 @@ class JarvisApp:
             file_roots=file_roots,
             apps=apps,
             file_policy=file_policy,
+            provider_factory=provider_factory,
         )
+
+    # ------------------------------------------------------------ memory
+
+    def _memory_service(self, models: ModelManager) -> MemoryService:
+        mcfg = self.settings.memory
+        kw = {} if mcfg.query_prefix is None else {"query_prefix": mcfg.query_prefix}
+        return MemoryService(
+            self.memory_store,
+            Embedder(models, **kw),
+            top_k=mcfg.top_k,
+            min_score=mcfg.min_score,
+            core_limit=mcfg.core_limit,
+            dedupe_threshold=mcfg.dedupe_threshold,
+        )
+
+    def _make_extractor(self) -> MemoryExtractor:
+        """Called on the memory thread: fresh model clients for that thread's loop."""
+        providers = self._provider_factory() if self._provider_factory else self.models.providers
+        models = ModelManager(
+            providers,
+            {r: str(ref) for r, ref in self.models.roles.items()},
+            role_options=self.models.role_options,
+            default_options=self.models.default_options,
+        )
+        return MemoryExtractor(models, self._memory_service(models))
+
+    def _memory_changed(self, changes: list[Change]) -> None:
+        for listener in list(self.memory_listeners):
+            listener(changes)
+
+    def learn(self, conversation_id: int | None, user_text: str, context: list[Message]) -> None:
+        """After a completed turn: let the background worker look for facts to remember."""
+        if self.memory.enabled and self.settings.memory.auto_learn:
+            self.memory_worker.submit(user_text, context, conversation_id)
+
+    async def remember(self, text: str) -> list[Change]:
+        """Explicit "remember this": phrase it like other memories, save verbatim if needed."""
+        extractor = MemoryExtractor(self.models, self.memory)
+        try:
+            changes = await extractor.extract(text, force=True)
+        except ProviderError:
+            changes = []
+        if not changes:
+            mem, created = await self.memory.save(text, source="told")
+            changes = [Change("add" if created else "update", mem.id, mem.text)]
+        return changes
 
     def tool_context(self, conversation_id: int | None = None) -> ToolContext:
         return ToolContext(
@@ -176,6 +259,7 @@ class JarvisApp:
             max_read_chars=self.settings.tools.files.max_read_chars,
             apps=self.apps,
             files=self.file_policy,
+            memory=self.memory,
         )
 
     async def chat_stream(
@@ -205,7 +289,11 @@ class JarvisApp:
     ) -> AsyncIterator[StreamChunk]:
         """Stateless chat WITH tools (used by evals). Nothing is saved to conversations."""
         tool_tokens = self.prompts.tokens_for_tools(self.registry.specs(ctx))
-        built = self.prompts.build(messages, extra_tokens=tool_tokens)
+        system_extra = None
+        if ctx.memory is not None:
+            recalled = await ctx.memory.prepare(messages)
+            messages, system_extra = recalled.messages, recalled.system_extra
+        built = self.prompts.build(messages, extra_tokens=tool_tokens, system_extra=system_extra)
         kw = {"on_message": on_message} if on_message else {}
         async for chunk in self.loop.run(
             built.messages, ctx, approver, role=role, options=options, **kw
@@ -214,5 +302,6 @@ class JarvisApp:
 
     async def aclose(self) -> None:
         self.scheduler.stop()
+        self.memory_worker.close()
         await self.models.aclose()
         self.db.close()

@@ -42,6 +42,7 @@ class ConversationManager:
         loop: AgentLoop | None = None,
         context_factory: Callable[[int | None], ToolContext] | None = None,
         role: str = "chat",
+        after_turn: Callable[[int, str, list[Message]], None] | None = None,
     ):
         self.models = models
         self.store = store
@@ -57,6 +58,7 @@ class ConversationManager:
             )
         )
         self.role = role
+        self.after_turn = after_turn
 
     def new(self, title: str | None = None) -> Conversation:
         return self.store.create(title)
@@ -101,7 +103,13 @@ class ConversationManager:
 
         ctx = self.context_factory(conversation_id)
         tool_tokens = self.prompts.tokens_for_tools(self.loop.registry.specs(ctx))
-        built = self.prompts.build(self.history(conversation_id), extra_tokens=tool_tokens)
+        history = self.history(conversation_id)
+        prior = [m for m in history[:-1] if m.role in ("user", "assistant") and m.content][-2:]
+        system_extra = None
+        if ctx.memory is not None:
+            recalled = await ctx.memory.prepare(history)  # stored message stays unchanged
+            history, system_extra = recalled.messages, recalled.system_extra
+        built = self.prompts.build(history, extra_tokens=tool_tokens, system_extra=system_extra)
 
         def on_message(
             msg: Message,
@@ -127,8 +135,14 @@ class ConversationManager:
             options=options,
             on_message=on_message,
         )
+        reply: list[str] = []
+        completed = False
         try:
             async for chunk in stream:
+                reply.append(chunk.text)
+                completed = completed or chunk.done
                 yield chunk
         finally:
             await stream.aclose()
+        if completed and self.after_turn:
+            self.after_turn(conversation_id, text, prior)

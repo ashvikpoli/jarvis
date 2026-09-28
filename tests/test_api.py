@@ -120,3 +120,15 @@ def test_tool_events_over_sse(make_app):
         tools = {t["name"]: t["permission"] for t in c.get("/v1/tools").json()}
         assert tools["files_list"] == "allow" and tools["files_delete"] == "ask"
         assert [a["tool"] for a in c.get("/v1/audit").json()] == ["files_write", "notes_add"]
+
+
+def test_memory_endpoints(client):
+    m = client.post("/v1/memories", json={"text": "User's name is Adi.", "category": "profile"})
+    assert m.status_code == 201
+    mid = m.json()["id"]
+    assert client.get("/v1/memories").json()[0]["text"] == "User's name is Adi."
+    r = client.patch(f"/v1/memories/{mid}", json={"text": "User's name is Adi N."})
+    assert r.json()["text"] == "User's name is Adi N."
+    assert client.delete(f"/v1/memories/{mid}").status_code == 204
+    assert client.delete(f"/v1/memories/{mid}").status_code == 404
+    assert client.get("/v1/memories").json() == []

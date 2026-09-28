@@ -72,6 +72,7 @@ class OllamaProvider(ModelProvider):
         # `think` and `keep_alive` are top-level request fields in Ollama; everything
         # else (temperature, num_ctx, ...) goes into `options`.
         think = opts.pop("think", self.settings.think)
+        fmt = opts.pop("format", None)  # "json" or a JSON schema → structured output
         body: dict[str, Any] = {
             "model": model,
             "messages": [_to_ollama(m) for m in messages],
@@ -84,6 +85,8 @@ class OllamaProvider(ModelProvider):
             body["think"] = think
         if tools:
             body["tools"] = tools
+        if fmt is not None:
+            body["format"] = fmt
 
         start = time.perf_counter()
         ttft: float | None = None
@@ -128,6 +131,18 @@ class OllamaProvider(ModelProvider):
             raise ProviderError(
                 f"Can't reach Ollama at {self.settings.base_url}. Is Ollama running?"
             ) from e
+
+    async def embed(self, texts: Sequence[str], model: str) -> list[list[float]]:
+        if not texts:
+            return []
+        data = await self._post_json(
+            "/api/embed",
+            {"model": model, "input": list(texts), "keep_alive": self.settings.keep_alive},
+        )
+        vectors = data.get("embeddings") or []
+        if len(vectors) != len(texts):
+            raise ProviderError(f"Ollama returned {len(vectors)} embeddings for {len(texts)} texts")
+        return vectors
 
     async def list_models(self) -> list[str]:
         data = await self._get_json("/api/tags")

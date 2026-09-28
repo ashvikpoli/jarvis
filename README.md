@@ -2,11 +2,12 @@
 
 A local-first personal AI assistant for Windows, built layer by layer.
 
-**Current phase: 2 — Tools.** Jarvis can work with your files, open apps and
-websites, check your PC's status, and keep notes and reminders — every action goes
-through a permission check and is recorded in an audit log. Built on Phase 1's
-saved, resumable conversations and eval harness.
-Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md).
+**Current phase: 3 — Memory.** Jarvis remembers you across conversations — your
+name, work, people, preferences, projects — learning as you talk, and you can see,
+correct and delete everything it remembers. Built on Phase 2's tools (files, apps,
+notes, reminders — every action permission-checked and audited) and Phase 1's saved
+conversations and evals.
+Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md).
 Full test checklist: [docs/testing.md](docs/testing.md).
 
 ## Setup (Windows, native — not WSL)
@@ -27,6 +28,7 @@ We run natively on Windows because later phases control the Windows desktop.
    cd jarvis
    uv sync                   # creates .venv, installs Python 3.12 if needed + deps
    ollama pull qwen3:8b      # ~5 GB; the default chat model (picked by evals)
+   ollama pull qwen3-embedding:0.6b   # 639 MB; lets memory search by meaning
    uv run jarvis doctor      # everything should be green
    uv run jarvis chat
    ```
@@ -44,6 +46,9 @@ uv run jarvis history                       # list conversations
 uv run jarvis history 3                     # print conversation #3
 uv run jarvis eval                          # score the chat model on evals/cases.toml
 uv run jarvis eval --models ollama:qwen3:14b,ollama:qwen3:8b   # compare models
+uv run jarvis memory                        # what Jarvis remembers about you
+uv run jarvis memory search sister          # search memories
+uv run jarvis memory forget 12              # delete a memory (also: clear, export FILE)
 uv run jarvis tools                         # what Jarvis can do + what needs your OK
 uv run jarvis audit                         # every tool call Jarvis has made
 uv run jarvis reminders                     # upcoming reminders
@@ -55,6 +60,7 @@ uv run python -m pytest                     # tests (python -m: Smart App Contro
 ```
 
 In chat: `/new`, `/list`, `/resume ID`, `/title TEXT`, `/think on|off`,
+`/memory` (`/memory off|on`), `/remember TEXT`, `/forget ID`,
 `/tools`, `/reminders`, `/model REF`, `/help`, `/exit`. **Ctrl+C while Jarvis is answering interrupts
 it** (the partial answer is saved); Ctrl+C at the prompt quits.
 
@@ -67,6 +73,21 @@ Stream from the API:
 curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
   -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'
 ```
+
+## Memory (Phase 3)
+
+Just talk: *"I'm Adi, I run Exinent"*, *"my sister Priya lives in Pune"*, *"I prefer
+short answers"*. After a reply you'll see **💾 Remembered: …** when Jarvis learns
+something (it learns in the background, so replies never wait). In a new
+conversation it already knows. Corrections update the old memory instead of adding
+a duplicate (*"I moved to Bangalore"* → ✏️ Updated).
+
+- *"What do you remember about me?"*, *"forget that I have a sister"*, `/memory`,
+  `/forget ID`, `jarvis memory export me.json`.
+- Never remembered as memories: passwords/codes (use notes), passing moods
+  ("tired today"), one-off requests, things only Jarvis said.
+- Stays on your PC in `data/jarvis.db`. Turn off for a session with `/memory off`,
+  or permanently with `[memory] enabled = false`; stop learning with `auto_learn = false`.
 
 ## What Jarvis can do (Phase 2)
 
@@ -128,7 +149,7 @@ Smart App Control (it can't be re-enabled without a reset).
 
 Env vars override everything: `$env:JARVIS_MODELS__ROLES__CHAT = "ollama:qwen3:8b"`.
 
-Data lives in `data/` (git-ignored): `jarvis.db` (conversations),
+Data lives in `data/` (git-ignored): `jarvis.db` (conversations, memories, notes, reminders),
 `logs/jarvis.log` (JSON lines with latency for every reply), `evals/` (eval results).
 
 ## Layout
@@ -141,7 +162,8 @@ src/jarvis/
   storage/            SQLite database + conversation store
   conversation/       ConversationManager, PromptBuilder (context window)
   agent/              AgentLoop: model ⇄ tools, permissions, audit
-  tools/              tool framework + files, system/apps, notes/reminders
+  memory/             long-term memory: store, embeddings, recall, background learning
+  tools/              tool framework + files, system/apps, notes/reminders, memory
   evals/              eval checks + runner
   interfaces/         cli.py, api.py
 evals/cases.toml      eval cases — add one whenever Jarvis gets something wrong
@@ -149,6 +171,6 @@ evals/cases.toml      eval cases — add one whenever Jarvis gets something wron
 
 ## Roadmap
 
-0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions ✅ · 3 Memory ·
+0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions ✅ · 3 Memory (testing) ·
 4 Voice MVP · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
 8 Polish + packaging

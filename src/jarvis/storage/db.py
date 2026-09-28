@@ -74,6 +74,23 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_reminders_due ON reminders(status, due_at);
     """,
+    # 3 — long-term memory
+    """
+    CREATE TABLE memories (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        text             TEXT NOT NULL,
+        category         TEXT NOT NULL DEFAULT 'other',  -- profile|preference|person|project|other
+        source           TEXT NOT NULL DEFAULT 'told',   -- told (explicit) | learned (extracted)
+        conversation_id  INTEGER,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL,
+        last_used_at     TEXT,
+        use_count        INTEGER NOT NULL DEFAULT 0,
+        embedding        BLOB,
+        embed_model      TEXT
+    );
+    CREATE INDEX idx_memories_category ON memories(category);
+    """,
 ]
 
 

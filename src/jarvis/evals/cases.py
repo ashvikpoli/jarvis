@@ -6,7 +6,7 @@ import json
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,13 +33,27 @@ class Checks(BaseModel):
     no_tools: bool = False  # answered without calling any tool
     # {"reminders_set": {"text": "stretch"}}: some call's arg contains the substring
     tool_args: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # memory learning (kind = "extract")
+    memories_any: list[str] = Field(default_factory=list)  # a learned memory contains one
+    memories_not: list[str] = Field(default_factory=list)  # no learned memory contains these
+    memories_none: bool = False  # nothing should be learned
+    ops_any: list[str] = Field(default_factory=list)  # e.g. ["update"]
+    ops_not: list[str] = Field(default_factory=list)  # e.g. ["add"]
+
+
+class SeedMemory(BaseModel):
+    text: str
+    category: str = "other"
 
 
 class EvalCase(BaseModel):
     id: str
     category: str
     prompt: str
+    kind: Literal["chat", "extract"] = "chat"  # extract = test memory learning only
     history: list[Message] = Field(default_factory=list)
+    # memories in the sandbox before the case runs; "default" = SANDBOX_MEMORIES
+    memories: list[SeedMemory] | Literal["default"] = Field(default_factory=list)
     checks: Checks = Field(default_factory=Checks)
     note: str = ""
 
@@ -147,6 +161,25 @@ def run_checks(reply: str, checks: Checks, tool_calls: list[ToolCall] | None = N
             fails.append(f"JSON missing keys {missing_keys}")
     if checks.no_markdown and _MARKDOWN.search(text):
         fails.append("contains markdown")
+    return fails
+
+
+def run_memory_checks(changes: list, checks: Checks) -> list[str]:
+    """Checks for kind="extract": what the learner added/updated/deleted."""
+    learned = [c.text for c in changes if c.op in ("add", "update")]
+    joined = " | ".join(learned).lower()
+    ops = [c.op for c in changes]
+    fails = []
+    if checks.memories_none and learned:
+        fails.append(f"shouldn't have learned anything, got {learned}")
+    if checks.memories_any and not any(x.lower() in joined for x in checks.memories_any):
+        fails.append(f"no learned memory mentions {checks.memories_any} (got {learned or 'none'})")
+    if bad := [x for x in checks.memories_not if x.lower() in joined]:
+        fails.append(f"learned forbidden content {bad}")
+    if checks.ops_any and not set(checks.ops_any) & set(ops):
+        fails.append(f"expected one of {checks.ops_any}, got ops {ops or 'none'}")
+    if bad := [o for o in checks.ops_not if o in ops]:
+        fails.append(f"unexpected ops {bad}")
     return fails
 
 

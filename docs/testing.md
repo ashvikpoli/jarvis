@@ -9,8 +9,8 @@ PowerShell in `C:\Jarvis`. Start with `uv sync` so you're on the latest dependen
 |---|---|---|
 | A1 | `uv run python -m pytest` | All pass. On Windows this also runs the Windows-only path-escape tests. (Use `python -m pytest`, not `pytest`: Windows Smart App Control blocks the unsigned `pytest.exe` launcher.) |
 | A2 | `uv run jarvis doctor` | All ✓. VRAM line 100% on GPU. |
-| A3 | `uv run jarvis eval -v` | Full suite (55 cases, ~5 min). Target ≥ 95%, answer ms < 100. |
-| A4 | `uv run jarvis tools` | 22 tools; `files_write/mkdir/move/delete` = ask, the rest allow. File access lists your 4 folders + the zone rules. |
+| A3 | `uv run jarvis eval -v` | Full suite (76 cases, ~6 min). Target ≥ 95%, answer ms < 100. |
+| A4 | `uv run jarvis tools` | 26 tools; `files_write/mkdir/move/delete` = ask, the rest allow. File access lists your 4 folders + the zone rules. |
 | A5 | `uv run jarvis apps` | Your installed apps, including Store apps (WhatsApp, Spotify if installed). |
 | A6 | `uv run jarvis apps discord` and `uv run jarvis apps discord.com` | Both point to the Discord app. |
 | A7 | `uv run jarvis notify` | A Windows notification appears. |
@@ -69,6 +69,22 @@ Tick each one. **"Asks"** means an approval prompt must appear.
 | B23 | "Remind me in 1 minute to stand up" then "actually make it 2 minutes" | `/reminders` shows **one** reminder, 2 min out. |
 | B24 | Wait 2 minutes (keep chat open) | Windows notification + ⏰ line in the chat. |
 | B25 | "Remind me tomorrow at 9am to call the bank", then "cancel that reminder" | Set, then cancelled; `/reminders` empty. |
+
+### Memory (Phase 3)
+| # | Say / do | Expected |
+|---|---|---|
+| B28 | `/new`, "Hi, I'm Adi. I run an e-commerce company called Exinent and I live in Hyderabad." | Reply, then **💾 Remembered** lines (name, company, city). |
+| B29 | "My sister Priya is a doctor in Pune." | 💾 Remembered about Priya. |
+| B30 | "What's the weather usually like in Goa?" | **No** 💾 line (nothing personal to learn). |
+| B31 | `/exit`, then a **new** `uv run jarvis chat`, "What's my company called and where do I live?" | Exinent, Hyderabad — from memory, in a brand-new conversation. |
+| B32 | "Who's Priya?" | Your sister, a doctor in Pune. |
+| B33 | "I moved to Bangalore last month." | **✏️ Updated memory** (not a second city). `/memory` shows Bangalore, no Hyderabad. |
+| B34 | "What do you remember about me?" | Accurate list, nothing invented. |
+| B35 | "Forget that I have a sister." | Priya memory removed (tool call or 🗑). `/memory` confirms. |
+| B36 | `/remember my favourite team is Sunrisers Hyderabad` | 💾 Remembered, phrased as "User's favourite …". |
+| B37 | "My wifi password is lemonade42" | **Not** stored as a memory (`/memory`). Jarvis may offer to save it as a note. |
+| B38 | `/memory off`, "What's my name?" | Doesn't know (memory off). `/memory on` restores. |
+| B39 | `uv run jarvis memory` and `uv run jarvis memory search bangalore` | Lists memories; search finds the city. |
 
 ### Honesty
 | # | Say | Expected |

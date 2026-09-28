@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,9 @@ HELP = """[bold]Commands[/]
   /resume ID       continue an earlier conversation
   /title TEXT      rename this conversation
   /think on|off    let the model reason before answering (slower, sometimes smarter)
+  /memory          what Jarvis remembers about you   (/memory off|on for this session)
+  /remember TEXT   tell Jarvis something to remember
+  /forget ID       delete a memory
   /tools           what Jarvis can do, and what needs your OK
   /reminders       upcoming reminders
   /model [REF]     show or switch the chat model, e.g. /model ollama:qwen3:8b
@@ -214,6 +218,11 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
         )
         app.scheduler.start()
         app.apps.prefetch()  # so the first "open X" doesn't wait for the app scan
+        try:
+            runner.run(app.memory.backfill())  # also loads the embedding model
+        except ProviderError:
+            pass
+        app.memory_listeners.append(_print_memory_changes)
 
         while True:
             try:
@@ -247,6 +256,31 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
                         console.print("[dim]Renamed.[/]")
                     else:
                         console.print("[dim]Say something first, then /title TEXT[/]")
+                elif cmd == "/memory":
+                    if arg in ("off", "on"):
+                        app.memory.enabled = arg == "on"
+                        console.print(f"[dim]Memory {arg} for this session.[/]")
+                    else:
+                        _print_memories(app)
+                elif cmd == "/remember":
+                    if not arg:
+                        console.print("[dim]Usage: /remember TEXT[/]")
+                    else:
+                        with console.status("Remembering..."):
+                            changes = runner.run(app.remember(arg))
+                        _print_memory_changes(changes)
+                elif cmd == "/forget":
+                    try:
+                        mid = int(arg.lstrip("#"))
+                        gone = app.memory_store.get(mid)
+                        if gone and app.memory.forget(mid):
+                            console.print(
+                                f"[magenta]🗑 Forgot #{mid}: {gone.text}[/]", highlight=False
+                            )
+                        else:
+                            console.print(f"[red]No memory #{mid}.[/]")
+                    except ValueError:
+                        console.print("[dim]Usage: /forget ID  (see /memory)[/]")
                 elif cmd == "/tools":
                     console.print(_tools_table(app))
                 elif cmd == "/reminders":
@@ -345,6 +379,73 @@ def cmd_eval(settings: Settings, args: argparse.Namespace) -> int:
     path = save_results(results, settings.app.data_dir / "evals")
     console.print(f"[dim]Full results: {path}[/]")
     return 0
+
+
+# ---------------------------------------------------------------- memory
+
+
+def _print_memory_changes(changes) -> None:
+    icons = {"add": "💾 Remembered", "update": "✏️  Updated memory", "delete": "🗑  Forgot"}
+    for c in changes:
+        if c.op in icons:
+            console.print(f"\n[magenta]{icons[c.op]} #{c.id}: {c.text}[/]", highlight=False)
+
+
+def _print_memories(app: JarvisApp) -> None:
+    items = app.memory_store.list()
+    if not items:
+        console.print("[dim]No memories yet. Tell me about yourself, or use /remember TEXT.[/]")
+        return
+    table = Table(header_style="bold", box=None, padding=(0, 2))
+    for col in ("ID", "Category", "Memory", "Source", "Used"):
+        table.add_column(col, overflow="fold")
+    for m in items:
+        table.add_row(str(m.id), m.category, m.text, m.source, str(m.use_count))
+    console.print(table)
+    state = "on" if app.memory.enabled else "[yellow]off[/]"
+    console.print(f"[dim]{len(items)} memories · memory {state} · /forget ID to delete[/]")
+
+
+def cmd_memory(settings: Settings, args: argparse.Namespace) -> int:
+    app = JarvisApp.create(settings)
+    code = 0
+    try:
+        action = args.action or "list"
+        if action == "list":
+            _print_memories(app)
+        elif action == "search":
+            hits = asyncio.run(app.memory.recall(" ".join(args.rest), limit=20, min_score=0.3))
+            for h in hits:
+                console.print(
+                    f"  #{h.memory.id}  [dim]{h.score:.2f} {h.how}[/]  {h.memory.text}",
+                    highlight=False,
+                )
+            if not hits:
+                console.print("[dim]Nothing found.[/]")
+        elif action == "forget":
+            for raw in args.rest:
+                mid = int(raw.lstrip("#"))
+                console.print(
+                    f"#{mid}: " + ("forgotten" if app.memory.forget(mid) else "not found")
+                )
+        elif action == "clear":
+            n = app.memory_store.count()
+            if console.input(f"Delete all {n} memories? Type 'yes' to confirm › ").strip() == "yes":
+                app.memory_store.clear()
+                console.print(f"Deleted {n} memories.")
+        elif action == "export":
+            path = Path(args.rest[0]) if args.rest else Path("jarvis-memories.json")
+            data = [m.model_dump() for m in app.memory_store.list()]
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            console.print(f"Exported {len(data)} memories to {path.resolve()}")
+        else:
+            console.print(
+                "Usage: jarvis memory [list | search TEXT | forget ID... | clear | export FILE]"
+            )
+            code = 1
+    finally:
+        asyncio.run(app.aclose())
+    return code
 
 
 # ---------------------------------------------------------------- tools / audit / reminders
@@ -543,6 +644,19 @@ async def _doctor(settings: Settings, quick: bool) -> list[tuple[str, bool | Non
         wanted = model if ":" in model else f"{model}:latest"
         pulled = wanted in available or model in available
         rows.append(("Model pulled", pulled, "yes" if pulled else f"run:  ollama pull {model}"))
+        emb = app.models.roles.get("embed")
+        if emb is not None and emb.provider == provider.name:
+            emb_model = emb.model if ":" in emb.model else f"{emb.model}:latest"
+            have = emb_model in available or emb.model in available
+            rows.append(
+                (
+                    "Memory",
+                    have,
+                    f"{app.memory_store.count()} memories · embeddings {emb}"
+                    if have
+                    else f"run:  ollama pull {emb.model}   (until then: keyword recall)",
+                )
+            )
         if not pulled or quick:
             return rows
 
@@ -639,6 +753,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host")
     s.add_argument("--port", type=int)
 
+    mem = sub.add_parser(
+        "memory", help="what Jarvis remembers: list | search | forget | clear | export"
+    )
+    mem.add_argument("action", nargs="?", choices=["list", "search", "forget", "clear", "export"])
+    mem.add_argument("rest", nargs="*")
+
     sub.add_parser("tools", help="list tools and their permissions")
     a = sub.add_parser("audit", help="recent tool calls")
     a.add_argument("--limit", type=int, default=30)
@@ -668,6 +788,7 @@ def main(argv: list[str] | None = None) -> int:
         "serve": cmd_serve,
         "doctor": cmd_doctor,
         "tools": cmd_tools,
+        "memory": cmd_memory,
         "audit": cmd_audit,
         "reminders": cmd_reminders,
         "apps": cmd_apps,

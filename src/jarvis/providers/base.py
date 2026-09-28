@@ -35,6 +35,10 @@ class ModelProvider(ABC):
         the consuming task is cancelled.
         """
 
+    async def embed(self, texts: Sequence[str], model: str) -> list[list[float]]:
+        """Turn texts into vectors (for memory search)."""
+        raise ProviderError(f"The {self.name} provider doesn't support embeddings.")
+
     @abstractmethod
     async def list_models(self) -> list[str]: ...
 
