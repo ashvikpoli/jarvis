@@ -35,19 +35,24 @@ class OllamaProvider(ModelProvider):
         *,
         options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
+        opts = dict(options or {})
+        # `think` and `keep_alive` are top-level request fields in Ollama; everything
+        # else (temperature, num_ctx, ...) goes into `options`.
+        think = opts.pop("think", self.settings.think)
         body: dict[str, Any] = {
             "model": model,
-            "messages": [m.model_dump() for m in messages],
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
             "stream": True,
-            "keep_alive": self.settings.keep_alive,
+            "keep_alive": opts.pop("keep_alive", self.settings.keep_alive),
         }
-        if options:
-            body["options"] = options
-        if self.settings.think is not None:
-            body["think"] = self.settings.think
+        if opts:
+            body["options"] = opts
+        if think is not None:
+            body["think"] = think
 
         start = time.perf_counter()
         ttft: float | None = None
+        answer_ttft: float | None = None
         try:
             # `async with` guarantees the connection closes if our task is cancelled,
             # which makes Ollama stop generating. This is what barge-in relies on.
@@ -63,8 +68,11 @@ class OllamaProvider(ModelProvider):
                         raise ProviderError(f"Ollama error: {err}")
                     msg = data.get("message") or {}
                     text, thinking = msg.get("content") or "", msg.get("thinking") or ""
+                    now_ms = (time.perf_counter() - start) * 1000
                     if (text or thinking) and ttft is None:
-                        ttft = (time.perf_counter() - start) * 1000
+                        ttft = now_ms
+                    if text and answer_ttft is None:
+                        answer_ttft = now_ms
                     if text or thinking:
                         yield StreamChunk(text=text, thinking=thinking)
                     if data.get("done"):
@@ -74,6 +82,7 @@ class OllamaProvider(ModelProvider):
                                 prompt_tokens=data.get("prompt_eval_count"),
                                 completion_tokens=data.get("eval_count"),
                                 ttft_ms=ttft,
+                                answer_ttft_ms=answer_ttft,
                                 total_ms=(time.perf_counter() - start) * 1000,
                             ),
                         )
@@ -94,11 +103,15 @@ class OllamaProvider(ModelProvider):
             for m in data.get("models", [])
         ]
 
-    async def load(self, model: str) -> None:
+    async def load(self, model: str, *, options: dict[str, Any] | None = None) -> None:
         # A generate call with no prompt loads the model and returns immediately.
-        await self._post_json(
-            "/api/generate", {"model": model, "keep_alive": self.settings.keep_alive}
-        )
+        # Pass the same load-affecting options (num_ctx...) chat will use, or Ollama
+        # would reload the model on the first real request.
+        opts = {k: v for k, v in (options or {}).items() if k not in ("think", "keep_alive")}
+        body: dict[str, Any] = {"model": model, "keep_alive": self.settings.keep_alive}
+        if opts:
+            body["options"] = opts
+        await self._post_json("/api/generate", body)
 
     async def unload(self, model: str) -> None:
         await self._post_json("/api/generate", {"model": model, "keep_alive": 0})

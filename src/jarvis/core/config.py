@@ -27,6 +27,14 @@ class LoggingSettings(BaseModel):
 
 class ModelsSettings(BaseModel):
     roles: dict[str, str] = Field(default_factory=lambda: {"chat": "ollama:qwen3:14b"})
+    # Per-role generation options, e.g. {"chat": {"think": False, "temperature": 0.7}}
+    options: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class ConversationSettings(BaseModel):
+    context_tokens: int = 8192  # prompt budget; also sent to Ollama as num_ctx
+    reserve_tokens: int = 1024  # room kept free for the reply
+    include_datetime: bool = True
 
 
 class OllamaSettings(BaseModel):
@@ -92,6 +100,7 @@ class Settings(BaseSettings):
     app: AppSettings = Field(default_factory=AppSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     models: ModelsSettings = Field(default_factory=ModelsSettings)
+    conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 
@@ -121,6 +130,6 @@ def load_settings(config_dir: Path | None = None, **overrides: Any) -> Settings:
         settings = Settings(config_dir=config_dir, **overrides)
     finally:
         Settings._toml_data = {}
-    if not settings.app.data_dir.is_absolute():
+    if not settings.app.data_dir.is_absolute():  # relative to the repo, not the cwd
         settings.app.data_dir = (config_dir.parent / settings.app.data_dir).resolve()
     return settings

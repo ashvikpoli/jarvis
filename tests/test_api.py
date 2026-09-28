@@ -13,7 +13,9 @@ from jarvis.providers import EchoProvider
 def client(tmp_path):
     (tmp_path / "default.toml").write_text('[models]\nroles = { chat = "echo:echo" }\n')
     settings = load_settings(tmp_path)
-    jarvis = JarvisApp.create(settings, providers={"echo": EchoProvider(delay_s=0)})
+    jarvis = JarvisApp.create(
+        settings, providers={"echo": EchoProvider(delay_s=0)}, db_path=":memory:"
+    )
     with TestClient(create_api(settings, jarvis)) as c:
         yield c
 
@@ -62,7 +64,33 @@ def test_system_prompt_injected(tmp_path):
 
     (tmp_path / "default.toml").write_text('[models]\nroles = { chat = "echo:echo" }\n')
     settings = load_settings(tmp_path)
-    jarvis = JarvisApp.create(settings, providers={"echo": Spy(delay_s=0)})
+    jarvis = JarvisApp.create(settings, providers={"echo": Spy(delay_s=0)}, db_path=":memory:")
     with TestClient(create_api(settings, jarvis)) as c:
         c.post("/v1/chat", json={"messages": [{"role": "user", "content": "x"}], "stream": False})
     assert captured["messages"][0].role == "system"
+
+
+def test_conversation_lifecycle(client):
+    conv = client.post("/v1/conversations", json={}).json()
+    cid = conv["id"]
+    r = client.post(f"/v1/conversations/{cid}/messages", json={"content": "hi", "stream": False})
+    assert r.json()["message"]["content"] == "You said: hi"
+
+    with client.stream("POST", f"/v1/conversations/{cid}/messages", json={"content": "again"}) as r:
+        events = [json.loads(line[6:]) for line in r.iter_lines() if line.startswith("data: ")]
+    assert events[-1]["type"] == "done"
+
+    detail = client.get(f"/v1/conversations/{cid}").json()
+    assert detail["conversation"]["title"] == "hi"
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"] * 2
+
+    listed = client.get("/v1/conversations").json()
+    assert listed[0]["id"] == cid and listed[0]["message_count"] == 4
+
+    assert client.delete(f"/v1/conversations/{cid}").status_code == 204
+    assert client.get(f"/v1/conversations/{cid}").status_code == 404
+
+
+def test_send_to_missing_conversation_404(client):
+    r = client.post("/v1/conversations/999/messages", json={"content": "x"})
+    assert r.status_code == 404

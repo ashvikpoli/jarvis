@@ -31,9 +31,27 @@ class ModelRef:
 
 
 class ModelManager:
-    def __init__(self, providers: Mapping[str, ModelProvider], roles: Mapping[str, str]):
+    def __init__(
+        self,
+        providers: Mapping[str, ModelProvider],
+        roles: Mapping[str, str],
+        *,
+        role_options: Mapping[str, Mapping[str, Any]] | None = None,
+        default_options: Mapping[str, Any] | None = None,
+    ):
         self.providers = dict(providers)
         self.roles: dict[str, ModelRef] = {r: ModelRef.parse(ref) for r, ref in roles.items()}
+        self.role_options: dict[str, dict[str, Any]] = {
+            r: dict(o) for r, o in (role_options or {}).items()
+        }
+        self.default_options: dict[str, Any] = dict(default_options or {})
+
+    def options_for(self, role: str, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """default options <- role options <- per-call options."""
+        return {**self.default_options, **self.role_options.get(role, {}), **(extra or {})}
+
+    def set_option(self, role: str, key: str, value: Any) -> None:
+        self.role_options.setdefault(role, {})[key] = value
 
     def set_role(self, role: str, ref: str) -> None:
         self.roles[role] = ModelRef.parse(ref)
@@ -57,7 +75,8 @@ class ModelManager:
         options: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         provider, model = self.resolve(role)
-        async for chunk in provider.stream_chat(messages, model, options=options):
+        opts = self.options_for(role, options)
+        async for chunk in provider.stream_chat(messages, model, options=opts):
             if chunk.done and chunk.usage:
                 u = chunk.usage
                 log.info(
@@ -66,6 +85,7 @@ class ModelManager:
                         "role": role,
                         "model": f"{provider.name}:{model}",
                         "ttft_ms": round(u.ttft_ms or 0, 1),
+                        "answer_ttft_ms": round(u.answer_ttft_ms or 0, 1),
                         "total_ms": round(u.total_ms or 0, 1),
                         "prompt_tokens": u.prompt_tokens,
                         "completion_tokens": u.completion_tokens,
@@ -75,8 +95,9 @@ class ModelManager:
             yield chunk
 
     async def warmup(self, role: str = "chat") -> None:
+        # Same options as chat, so e.g. num_ctx matches and Ollama doesn't reload.
         provider, model = self.resolve(role)
-        await provider.load(model)
+        await provider.load(model, options=self.options_for(role))
 
     async def unload(self, role: str = "chat") -> None:
         provider, model = self.resolve(role)

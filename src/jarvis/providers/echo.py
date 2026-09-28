@@ -43,6 +43,7 @@ class EchoProvider(ModelProvider):
                 prompt_tokens=sum(len(m.content.split()) for m in messages),
                 completion_tokens=len(words),
                 ttft_ms=ttft,
+                answer_ttft_ms=ttft,
                 total_ms=(time.perf_counter() - start) * 1000,
             ),
         )

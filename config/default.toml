@@ -19,11 +19,22 @@ json_file = true
 # Pick the chat model after comparing a few on your eval prompts (Phase 1).
 roles = { chat = "ollama:qwen3:14b" }
 
+# Per-role generation options. `think = false` skips the reasoning phase of
+# thinking models (much faster first answer). Toggle live in chat with /think on.
+[models.options.chat]
+think = false
+temperature = 0.7
+
+[conversation]
+context_tokens = 8192      # prompt budget; also sent to Ollama as num_ctx (more = more VRAM)
+reserve_tokens = 1024      # room kept free for the reply
+include_datetime = true    # tell the model the current date/time
+
 [providers.ollama]
 base_url = "http://127.0.0.1:11434"
 keep_alive = "30m"         # how long the model stays in VRAM after last use
 timeout_s = 120
-# think = false            # for thinking models: false = faster, no reasoning trace
+# think = false            # provider-wide default; per-role [models.options.*] wins
 
 [server]
 host = "127.0.0.1"         # local only. Don't expose to your network without auth.

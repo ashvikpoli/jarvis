@@ -37,7 +37,9 @@ class ModelProvider(ABC):
     async def loaded_models(self) -> list[LoadedModel]:
         return []
 
-    async def load(self, model: str) -> None:  # noqa: B027 - optional hook
+    async def load(  # noqa: B027 - optional hook
+        self, model: str, *, options: dict[str, Any] | None = None
+    ) -> None:
         """Warm a model into memory. No-op for providers that don't need it."""
 
     async def unload(self, model: str) -> None:  # noqa: B027 - optional hook

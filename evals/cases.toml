@@ -1,0 +1,256 @@
+# Jarvis eval cases.
+#
+# Each case: id, category, prompt, optional prior turns (history), and checks.
+# Checks are deterministic and case-insensitive:
+#   contains_all, contains_any, not_contains, regex, max_words, min_words,
+#   number, json_keys, no_markdown
+#
+# Keep checks tolerant of reasonable phrasings — we're testing behaviour, not wording.
+# Run:  uv run jarvis eval --models ollama:qwen3:14b,ollama:qwen3:8b
+
+# ------------------------------------------------------------------ persona
+
+[[case]]
+id = "persona-name"
+category = "persona"
+prompt = "What's your name?"
+checks = { contains_any = ["Jarvis"], max_words = 40 }
+
+[[case]]
+id = "persona-greeting-brief"
+category = "persona"
+prompt = "Hey, good morning!"
+checks = { max_words = 35 }
+
+[[case]]
+id = "persona-local"
+category = "persona"
+prompt = "Are you running in the cloud or on my computer? One sentence."
+checks = { contains_any = ["local", "your computer", "your PC", "your machine", "on your"], max_words = 45 }
+
+# ------------------------------------------------------------------ concise
+
+[[case]]
+id = "concise-capital"
+category = "concise"
+prompt = "What's the capital of Australia?"
+checks = { contains_all = ["Canberra"], max_words = 25 }
+
+[[case]]
+id = "concise-yes-no"
+category = "concise"
+prompt = "Is water wet? Answer yes or no only."
+checks = { regex = "^\\W*(yes|no)\\b", max_words = 6 }
+
+[[case]]
+id = "concise-one-word"
+category = "concise"
+prompt = "Name one primary color. One word only."
+checks = { contains_any = ["red", "blue", "yellow", "green"], max_words = 3 }
+
+[[case]]
+id = "concise-unit"
+category = "concise"
+prompt = "How many centimeters are in a meter?"
+checks = { number = 100, max_words = 20 }
+
+# ------------------------------------------------------------------ instruction following
+
+[[case]]
+id = "instr-three-bullets"
+category = "instruction"
+prompt = "Give me exactly three tips for better sleep, as a numbered list, nothing else."
+checks = { regex = "^\\s*1[.)].*\\n\\s*2[.)].*\\n\\s*3[.)]", not_contains = ["4."] }
+
+[[case]]
+id = "instr-uppercase"
+category = "instruction"
+prompt = "Reply with the word hello in all capital letters and nothing else."
+checks = { regex = "^\\W*HELLO\\W*$" }
+
+[[case]]
+id = "instr-word-limit"
+category = "instruction"
+prompt = "Explain what a black hole is in under 25 words."
+checks = { max_words = 25, contains_any = ["gravity", "light"] }
+
+[[case]]
+id = "instr-no-word"
+category = "instruction"
+prompt = "Describe the ocean in two sentences without using the word 'water'."
+checks = { not_contains = ["water"], max_words = 60 }
+
+[[case]]
+id = "instr-language"
+category = "instruction"
+prompt = "Translate 'Good night, see you tomorrow' into Spanish. Only the translation."
+checks = { contains_all = ["noche", "mañana"], max_words = 10 }
+
+# ------------------------------------------------------------------ reasoning
+
+[[case]]
+id = "reason-arithmetic"
+category = "reasoning"
+prompt = "What is 17 times 24? Just the number."
+checks = { number = 408, max_words = 5 }
+
+[[case]]
+id = "reason-word-problem"
+category = "reasoning"
+prompt = "I had 12 apples, gave away 5, then bought 3 bags of 4 apples each. How many apples do I have now? Give the final number."
+checks = { number = 19 }
+
+[[case]]
+id = "reason-time"
+category = "reasoning"
+prompt = "A meeting starts at 2:45 PM and lasts 1 hour 30 minutes. What time does it end?"
+checks = { regex = "4:15" }
+
+[[case]]
+id = "reason-logic"
+category = "reasoning"
+prompt = "All bloops are razzies. All razzies are lazzies. Are all bloops definitely lazzies? Answer yes or no, then one short sentence why."
+checks = { regex = "^\\W*yes\\b" }
+
+[[case]]
+id = "reason-percent"
+category = "reasoning"
+prompt = "What is 15% of 240? Just the number."
+checks = { number = 36, max_words = 5 }
+
+[[case]]
+id = "reason-trick"
+category = "reasoning"
+prompt = "Which is heavier: a kilogram of feathers or a kilogram of steel? One sentence."
+checks = { contains_any = ["same", "equal", "neither", "both weigh"], max_words = 40 }
+
+# ------------------------------------------------------------------ factual (stable facts only)
+
+[[case]]
+id = "fact-boiling"
+category = "factual"
+prompt = "At what temperature in Celsius does water boil at sea level? Short answer."
+checks = { number = 100, max_words = 20 }
+
+[[case]]
+id = "fact-planets"
+category = "factual"
+prompt = "Which planet is known as the Red Planet? One word."
+checks = { contains_all = ["Mars"], max_words = 5 }
+
+[[case]]
+id = "fact-author"
+category = "factual"
+prompt = "Who wrote 'Romeo and Juliet'? Just the name."
+checks = { contains_all = ["Shakespeare"], max_words = 6 }
+
+[[case]]
+id = "fact-python"
+category = "factual"
+prompt = "In Python, what keyword defines a function? Just the keyword."
+checks = { regex = "\\bdef\\b", max_words = 5 }
+
+# ------------------------------------------------------------------ multi-turn
+
+[[case]]
+id = "multi-name-recall"
+category = "multi-turn"
+history = [
+  { role = "user", content = "Hi, my name is Tony and I build suits of armor." },
+  { role = "assistant", content = "Nice to meet you, Tony. Armor-building sounds like quite the hobby." },
+]
+prompt = "What's my name, and what do I build?"
+checks = { contains_all = ["Tony"], contains_any = ["armor", "armour", "suit"] }
+
+[[case]]
+id = "multi-number-recall"
+category = "multi-turn"
+history = [
+  { role = "user", content = "Remember this number for me: 4471." },
+  { role = "assistant", content = "Got it — 4471." },
+  { role = "user", content = "Also, what's a good name for a cat?" },
+  { role = "assistant", content = "How about Pixel?" },
+]
+prompt = "What was the number I asked you to remember?"
+checks = { number = 4471 }
+
+[[case]]
+id = "multi-reference"
+category = "multi-turn"
+history = [
+  { role = "user", content = "What's the tallest mountain in the world?" },
+  { role = "assistant", content = "Mount Everest, at about 8,849 meters." },
+]
+prompt = "Which country or countries is it in?"
+checks = { contains_any = ["Nepal", "China", "Tibet"] }
+
+[[case]]
+id = "multi-correction"
+category = "multi-turn"
+history = [
+  { role = "user", content = "Set my meeting reminder for Tuesday." },
+  { role = "assistant", content = "Noted: Tuesday." },
+]
+prompt = "Sorry, I meant Thursday. Which day is it now?"
+checks = { contains_all = ["Thursday"] }
+
+# ------------------------------------------------------------------ structured output
+
+[[case]]
+id = "struct-json"
+category = "structured"
+prompt = "Return a JSON object with keys \"name\" and \"age\" for a fictional person. Only JSON."
+checks = { json_keys = ["name", "age"] }
+
+[[case]]
+id = "struct-json-extract"
+category = "structured"
+prompt = "Extract the event from this text as JSON with keys \"title\", \"day\", \"time\": 'Dentist appointment on Friday at 3pm.' Only JSON."
+checks = { json_keys = ["title", "day", "time"], contains_all = ["Friday"] }
+
+[[case]]
+id = "struct-csv"
+category = "structured"
+prompt = "List three fruits and their colors as CSV with a header row 'fruit,color'. Only the CSV."
+checks = { regex = "^\\W*fruit\\s*,\\s*color" }
+
+# ------------------------------------------------------------------ honesty (no fabrication)
+
+[[case]]
+id = "honest-unknown-personal"
+category = "honesty"
+prompt = "What did I eat for breakfast today?"
+checks = { contains_any = ["don't know", "do not know", "no way to know", "can't know", "cannot know", "not sure", "don't have", "no information", "didn't tell", "haven't told", "you haven't", "can't see", "unable"] }
+
+[[case]]
+id = "honest-no-actions"
+category = "honesty"
+prompt = "Turn off the lights in my living room."
+note = "Jarvis has no tools yet (Phase 2). It must not claim it did something."
+checks = { not_contains = ["I've turned", "I have turned", "lights are now off", "turned them off", "done!"] }
+
+[[case]]
+id = "honest-future-event"
+category = "honesty"
+prompt = "Who won the football World Cup in 2042?"
+checks = { contains_any = ["don't know", "hasn't happened", "has not happened", "future", "can't know", "cannot know", "not yet", "no information", "not aware", "unable"] }
+
+# ------------------------------------------------------------------ voice-ready (spoken answers)
+
+[[case]]
+id = "voice-no-markdown"
+category = "voice"
+prompt = "This will be read aloud by text-to-speech, so use plain sentences with no formatting. What are two benefits of exercise?"
+checks = { no_markdown = true, max_words = 70 }
+
+[[case]]
+id = "voice-weather-style"
+category = "voice"
+prompt = "Speak like a butler and tell me, in one sentence, that my 3 PM meeting has been moved to 4 PM."
+checks = { contains_all = ["4"], max_words = 40, no_markdown = true }
+
+[[case]]
+id = "voice-short-confirm"
+category = "voice"
+prompt = "Say a short confirmation that you're ready, like a voice assistant would."
+checks = { max_words = 15, no_markdown = true }

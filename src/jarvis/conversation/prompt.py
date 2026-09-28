@@ -1,0 +1,95 @@
+"""PromptBuilder: system prompt + context + as much recent history as fits."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+
+from jarvis.core.types import Message
+
+PER_MESSAGE_OVERHEAD = 4  # role markers / separators the chat template adds
+
+
+def estimate_tokens(text: str) -> int:
+    """Cheap, deliberately conservative estimate (~3.5 chars/token for English).
+
+    Real tokenizers vary; over-estimating slightly just means we trim a bit early,
+    which is much better than overflowing the context window.
+    """
+    return int(len(text) / 3.5) + 1
+
+
+@dataclass
+class BuiltPrompt:
+    messages: list[Message]
+    dropped: int  # history messages that didn't fit
+    est_tokens: int
+
+
+class PromptBuilder:
+    def __init__(
+        self,
+        system_prompt: str,
+        *,
+        context_tokens: int = 8192,
+        reserve_tokens: int = 1024,
+        include_datetime: bool = True,
+        estimator: Callable[[str], int] = estimate_tokens,
+        clock: Callable[[], datetime] = lambda: datetime.now().astimezone(),
+    ):
+        self.system_prompt = system_prompt
+        self.context_tokens = context_tokens
+        self.reserve_tokens = reserve_tokens
+        self.include_datetime = include_datetime
+        self.estimator = estimator
+        self.clock = clock
+
+    def _cost(self, m: Message) -> int:
+        return self.estimator(m.content) + PER_MESSAGE_OVERHEAD
+
+    def system_message(self, dropped: int = 0) -> Message:
+        parts = [self.system_prompt.strip()]
+        if self.include_datetime:
+            now = self.clock().strftime("%A, %d %B %Y, %H:%M %Z")
+            parts.append(f"Current date and time: {now}")
+        if dropped:
+            parts.append(
+                f"({dropped} earlier messages in this conversation are not shown due to length.)"
+            )
+        return Message.system("\n\n".join(parts))
+
+    def build(self, history: Sequence[Message]) -> BuiltPrompt:
+        """Fit history into the budget, newest first. The last message is always kept.
+
+        A leading system message in `history` replaces the configured system prompt
+        (used by the stateless API when callers bring their own).
+        """
+        history = list(history)
+        system_override = None
+        if history and history[0].role == "system":
+            system_override = history.pop(0)
+
+        # Reserve a little for the "N messages omitted" note in case we need it.
+        budget = self.context_tokens - self.reserve_tokens - 30
+        system = system_override or self.system_message()
+        budget -= self._cost(system)
+
+        kept: list[Message] = []
+        for i, m in enumerate(reversed(history)):
+            cost = self._cost(m)
+            if i > 0 and cost > budget:
+                break
+            kept.append(m)
+            budget -= cost
+        kept.reverse()
+        dropped = len(history) - len(kept)
+
+        if dropped and system_override is None:
+            system = self.system_message(dropped)
+        messages = [system, *kept]
+        return BuiltPrompt(
+            messages=messages,
+            dropped=dropped,
+            est_tokens=sum(self._cost(m) for m in messages),
+        )

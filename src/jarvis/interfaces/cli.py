@@ -1,4 +1,4 @@
-"""Command line: `jarvis chat`, `jarvis serve`, `jarvis doctor`."""
+"""Command line: `jarvis chat | history | eval | serve | doctor`."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import shutil
 import subprocess
 import sys
+from contextlib import aclosing
 from pathlib import Path
 
 from rich.console import Console
@@ -15,54 +16,94 @@ from rich.text import Text
 
 from jarvis import __version__
 from jarvis.app import JarvisApp
+from jarvis.conversation import ConversationNotFound
 from jarvis.core.config import Settings, load_settings
 from jarvis.core.logging import setup_logging
 from jarvis.core.types import Message, Usage
 from jarvis.providers import ProviderError
+from jarvis.storage import Conversation, StoredMessage
 
 console = Console()
 
 HELP = """[bold]Commands[/]
-  /model [ref]   show or switch the chat model, e.g. /model ollama:qwen3:8b
-  /reset         clear the conversation
-  /help          show this
-  /exit          quit
+  /new             start a new conversation
+  /list            recent conversations
+  /resume ID       continue an earlier conversation
+  /title TEXT      rename this conversation
+  /think on|off    let the model reason before answering (slower, sometimes smarter)
+  /model [REF]     show or switch the chat model, e.g. /model ollama:qwen3:8b
+  /help            show this
+  /exit            quit
 [dim]Ctrl+C while Jarvis is talking interrupts it. Ctrl+C at the prompt quits.[/]"""
 
 
-# ---------------------------------------------------------------- chat
-
-
-async def _stream_turn(
-    app: JarvisApp, history: list[Message], parts: list[str], show_thinking: bool
-) -> Usage | None:
-    usage = None
-    in_thinking = False
-    async for chunk in app.chat_stream(history):
-        if chunk.thinking and show_thinking:
-            console.print(Text(chunk.thinking, style="dim italic"), end="")
-            in_thinking = True
-        if chunk.text:
-            if in_thinking:
-                console.print()
-                in_thinking = False
-            parts.append(chunk.text)
-            console.out(chunk.text, end="", highlight=False)
-        if chunk.done:
-            usage = chunk.usage
-    console.print()
-    return usage
+# ---------------------------------------------------------------- helpers
 
 
 def _stats(usage: Usage | None) -> str:
     if not usage:
         return ""
     bits = []
-    if usage.ttft_ms is not None:
+    if usage.answer_ttft_ms is not None:
+        bits.append(f"answer in {usage.answer_ttft_ms:.0f} ms")
+        if usage.ttft_ms is not None and usage.answer_ttft_ms - usage.ttft_ms > 50:
+            bits.append(f"thought for {(usage.answer_ttft_ms - usage.ttft_ms) / 1000:.1f} s")
+    elif usage.ttft_ms is not None:
         bits.append(f"first token {usage.ttft_ms:.0f} ms")
     if usage.tokens_per_s:
         bits.append(f"{usage.tokens_per_s:.0f} tok/s")
     return " · ".join(bits)
+
+
+def _conversation_table(convs: list[Conversation]) -> Table:
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    table.add_column("ID", justify="right")
+    table.add_column("Title")
+    table.add_column("Msgs", justify="right")
+    table.add_column("Updated")
+    for c in convs:
+        table.add_row(
+            str(c.id),
+            c.title or "[dim](untitled)[/]",
+            str(c.message_count),
+            c.updated_at[:16].replace("T", " "),
+        )
+    return table
+
+
+def _print_message(m: StoredMessage) -> None:
+    if m.role == "user":
+        console.print(f"[bold cyan]you ›[/] {m.content}")
+    elif m.role == "assistant":
+        console.print("[bold green]jarvis ›[/] ", end="")
+        console.out(m.content, highlight=False)
+        if m.interrupted:
+            console.print("[dim]⏹ interrupted[/]")
+
+
+# ---------------------------------------------------------------- chat
+
+
+async def _stream_turn(
+    app: JarvisApp, conversation_id: int, text: str, show_thinking: bool
+) -> Usage | None:
+    usage = None
+    in_thinking = False
+    # aclosing(): if we're interrupted, the partial reply is saved right away.
+    async with aclosing(app.conversations.send(conversation_id, text)) as stream:
+        async for chunk in stream:
+            if chunk.thinking and show_thinking:
+                console.print(Text(chunk.thinking, style="dim italic"), end="")
+                in_thinking = True
+            if chunk.text:
+                if in_thinking:
+                    console.print()
+                    in_thinking = False
+                console.out(chunk.text, end="", highlight=False)
+            if chunk.done:
+                usage = chunk.usage
+    console.print()
+    return usage
 
 
 def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
@@ -72,11 +113,30 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
     elif args.model:
         app.models.set_role("chat", args.model)
 
-    history: list[Message] = []
+    show_thinking = args.show_thinking
+    if show_thinking:
+        app.models.set_option("chat", "think", True)
+
+    conv: Conversation | None = None
+    if args.resume:
+        try:
+            conv = (
+                app.store.latest()
+                if args.resume == "last"
+                else app.conversations.get(int(args.resume))
+            )
+        except (ConversationNotFound, ValueError) as e:
+            console.print(f"[red]✗ {e}[/]")
+            return 1
+
     console.print(
         f"[bold]{settings.app.name}[/] v{__version__} · model [cyan]{app.models.roles['chat']}[/]"
         "  [dim](/help for commands)[/]"
     )
+    if conv:
+        console.print(f"[dim]Resuming #{conv.id}: {conv.title or '(untitled)'}[/]")
+        for m in app.store.messages(conv.id)[-6:]:
+            _print_message(m)
 
     # asyncio.Runner keeps one event loop alive across turns, and turns Ctrl+C into
     # cancellation of the running turn only — so interrupting doesn't exit the app.
@@ -99,15 +159,36 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
 
             if text.startswith("/"):
                 cmd, _, arg = text.partition(" ")
+                arg = arg.strip()
                 if cmd in ("/exit", "/quit"):
                     break
-                elif cmd == "/reset":
-                    history.clear()
-                    console.print("[dim]Conversation cleared.[/]")
+                elif cmd in ("/new", "/reset"):
+                    conv = None
+                    console.print("[dim]New conversation.[/]")
+                elif cmd == "/list":
+                    console.print(_conversation_table(app.store.list(15)))
+                elif cmd == "/resume":
+                    try:
+                        conv = app.conversations.get(int(arg))
+                        console.print(f"[dim]Resuming #{conv.id}: {conv.title or ''}[/]")
+                        for m in app.store.messages(conv.id)[-6:]:
+                            _print_message(m)
+                    except (ConversationNotFound, ValueError):
+                        console.print("[red]Usage: /resume ID  (see /list)[/]")
+                elif cmd == "/title":
+                    if conv and arg:
+                        app.store.rename(conv.id, arg)
+                        console.print("[dim]Renamed.[/]")
+                    else:
+                        console.print("[dim]Say something first, then /title TEXT[/]")
+                elif cmd == "/think":
+                    show_thinking = arg.lower() in ("on", "true", "1", "yes")
+                    app.models.set_option("chat", "think", show_thinking)
+                    console.print(f"[dim]Thinking {'on' if show_thinking else 'off'}.[/]")
                 elif cmd == "/model":
                     if arg:
                         try:
-                            app.models.set_role("chat", arg.strip())
+                            app.models.set_role("chat", arg)
                             with console.status("Loading model..."):
                                 runner.run(app.models.warmup("chat"))
                             console.print(f"[dim]Switched to {app.models.roles['chat']}[/]")
@@ -119,26 +200,81 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
                     console.print(HELP)
                 continue
 
-            history.append(Message.user(text))
-            parts: list[str] = []
+            if conv is None:
+                conv = app.conversations.new()
             usage = None
             console.print("[bold green]jarvis ›[/] ", end="")
             try:
-                usage = runner.run(_stream_turn(app, history, parts, args.show_thinking))
+                usage = runner.run(_stream_turn(app, conv.id, text, show_thinking))
             except KeyboardInterrupt:
                 console.print("\n[dim]⏹ interrupted[/]")
             except ProviderError as e:
                 console.print(f"\n[red]✗ {e}[/]")
-
-            reply = "".join(parts)
-            if reply:
-                history.append(Message.assistant(reply))
-            else:
-                history.pop()  # nothing came back; don't leave a dangling user turn
             if stats := _stats(usage):
                 console.print(f"[dim]{stats}[/]")
 
         runner.run(app.aclose())
+    if conv:
+        console.print(f"[dim]Saved as #{conv.id}. Continue with: jarvis chat --resume {conv.id}[/]")
+    return 0
+
+
+# ---------------------------------------------------------------- history
+
+
+def cmd_history(settings: Settings, args: argparse.Namespace) -> int:
+    app = JarvisApp.create(settings)
+    try:
+        if args.id is None:
+            convs = app.store.list(args.limit)
+            if not convs:
+                console.print("[dim]No conversations yet.[/]")
+            else:
+                console.print(_conversation_table(convs))
+            return 0
+        try:
+            conv = app.conversations.get(args.id)
+        except ConversationNotFound as e:
+            console.print(f"[red]✗ {e}[/]")
+            return 1
+        console.print(f"[bold]#{conv.id} {conv.title or ''}[/]  [dim]{conv.created_at[:16]}[/]\n")
+        for m in app.store.messages(conv.id):
+            _print_message(m)
+        return 0
+    finally:
+        asyncio.run(app.aclose())
+
+
+# ---------------------------------------------------------------- eval
+
+
+def cmd_eval(settings: Settings, args: argparse.Namespace) -> int:
+    from jarvis.evals import EvalRunner, load_cases, print_report, save_results
+
+    cases = load_cases(args.cases)
+    if args.category:
+        cases = [c for c in cases if c.category in args.category.split(",")]
+    if args.only:
+        cases = [c for c in cases if c.id in args.only.split(",")]
+    if not cases:
+        console.print("[red]No eval cases matched.[/]")
+        return 1
+
+    app = JarvisApp.create(settings)
+    refs = args.models.split(",") if args.models else [str(app.models.roles["chat"])]
+    options = {"think": args.think} if args.think is not None else None
+
+    async def run():
+        try:
+            runner = EvalRunner(app, console=console)
+            return [await runner.run_model(ref, cases, options=options) for ref in refs]
+        finally:
+            await app.aclose()
+
+    results = asyncio.run(run())
+    print_report(results, console, verbose=args.verbose)
+    path = save_results(results, settings.app.data_dir / "evals")
+    console.print(f"[dim]Full results: {path}[/]")
     return 0
 
 
@@ -217,7 +353,8 @@ async def _doctor(settings: Settings, quick: bool) -> list[tuple[str, bool | Non
         parts: list[str] = []
         usage = None
         await app.models.warmup("chat")
-        async for chunk in app.chat_stream([Message.user("Reply with exactly one word: ready")]):
+        stream = app.chat_stream([Message.user("Reply with exactly one word: ready")])
+        async for chunk in stream:
             parts.append(chunk.text)
             usage = chunk.usage or usage
         rows.append(
@@ -276,7 +413,31 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("chat", help="chat in the terminal (default)")
     c.add_argument("--model", help="override chat model, e.g. ollama:qwen3:8b")
     c.add_argument("--echo", action="store_true", help="use the offline echo provider")
-    c.add_argument("--show-thinking", action="store_true", help="print reasoning traces")
+    c.add_argument("--show-thinking", action="store_true", help="turn thinking on and show it")
+    c.add_argument(
+        "--resume",
+        nargs="?",
+        const="last",
+        metavar="ID",
+        help="continue a conversation (default: the most recent)",
+    )
+
+    h = sub.add_parser("history", help="list conversations, or print one")
+    h.add_argument("id", nargs="?", type=int)
+    h.add_argument("--limit", type=int, default=20)
+
+    e = sub.add_parser("eval", help="score models on the eval cases")
+    e.add_argument("--models", help="comma-separated refs, e.g. ollama:qwen3:14b,ollama:qwen3:8b")
+    e.add_argument("--cases", type=Path, help="cases file (default: evals/cases.toml)")
+    e.add_argument("--category", help="only these categories (comma-separated)")
+    e.add_argument("--only", help="only these case ids (comma-separated)")
+    e.add_argument(
+        "--think",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="force thinking on/off (default: config)",
+    )
+    e.add_argument("-v", "--verbose", action="store_true", help="show every failure")
 
     s = sub.add_parser("serve", help="run the HTTP API")
     s.add_argument("--host")
@@ -293,7 +454,13 @@ def main(argv: list[str] | None = None) -> int:
         args = build_parser().parse_args([*(argv or sys.argv[1:]), "chat"])
     settings = load_settings(args.config_dir)
     setup_logging(settings)
-    handlers = {"chat": cmd_chat, "serve": cmd_serve, "doctor": cmd_doctor}
+    handlers = {
+        "chat": cmd_chat,
+        "history": cmd_history,
+        "eval": cmd_eval,
+        "serve": cmd_serve,
+        "doctor": cmd_doctor,
+    }
     return handlers[args.command](settings, args)
 
 

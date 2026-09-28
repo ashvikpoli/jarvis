@@ -151,3 +151,38 @@ async def test_ollama_models_and_unload():
     await p.unload("qwen3:14b")
     assert json.loads(calls[-1][2]) == {"model": "qwen3:14b", "keep_alive": 0}
     await p.aclose()
+
+
+async def test_ollama_option_routing_and_answer_ttft():
+    bodies = []
+
+    def handler(request: httpx.Request):
+        bodies.append(json.loads(request.content))
+        if request.url.path == "/api/generate":
+            return httpx.Response(200, json={})
+        return httpx.Response(
+            200,
+            content=ndjson(
+                {"message": {"content": "", "thinking": "hmm"}, "done": False},
+                {"message": {"content": "Hi"}, "done": False},
+                {"message": {"content": ""}, "done": True, "eval_count": 1},
+            ),
+        )
+
+    m = ModelManager(
+        {"ollama": make_ollama(handler)},
+        {"chat": "ollama:qwen3:14b"},
+        role_options={"chat": {"think": True, "temperature": 0.2}},
+        default_options={"num_ctx": 8192},
+    )
+    await m.warmup("chat")
+    chunks = [c async for c in m.stream_chat([Message.user("x")])]
+    await m.aclose()
+
+    load, chat = bodies
+    assert load["options"] == {"num_ctx": 8192, "temperature": 0.2}  # same ctx => no reload
+    assert "think" not in load
+    assert chat["think"] is True
+    assert chat["options"] == {"num_ctx": 8192, "temperature": 0.2}
+    usage = chunks[-1].usage
+    assert usage.answer_ttft_ms >= usage.ttft_ms
