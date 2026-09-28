@@ -137,6 +137,38 @@ class MemorySettings(BaseModel):
     query_prefix: str | None = None  # embedding instruction; None = model default
 
 
+class VoiceSettings(BaseModel):
+    hotkey: str = "ctrl_r"  # tap Right Ctrl to talk; or a combo like "<ctrl>+<alt>+j"
+    # speech-to-text (faster-whisper)
+    stt_model: str = "distil-large-v3.5"  # English; "large-v3-turbo" = multilingual
+    stt_device: str = "auto"  # auto (GPU if it works, else CPU) | cuda | cpu
+    stt_compute_type: str = "auto"  # auto = float16 on GPU, int8 on CPU
+    stt_beam_size: int = 0  # 0 = auto (5 on GPU, 1 on CPU)
+    language: str = "en"
+    hotwords: str = "Jarvis"  # words Whisper should expect (names, jargon)
+    # listening
+    silence_ms: int = 700  # this much quiet after you speak = you're done
+    start_timeout_s: float = 6.0  # stop listening if you don't start within this
+    max_listen_s: float = 30.0
+    vad_threshold: float = 0.5  # 0..1; raise it if background noise triggers listening
+    input_device: str = ""  # "" = Windows default; or a number / part of the name
+    # speaking (Kokoro)
+    speak: bool = True
+    tts_voice: str = "bm_george"
+    tts_speed: float = 1.0
+    tts_model: str = "kokoro-v1.0.onnx"  # or kokoro-v1.0.fp16.onnx (half the size)
+    output_device: str = ""
+    earcons: bool = True  # little beeps when listening starts / nothing was heard
+    # added to the system prompt in voice mode
+    style: str = (
+        "Voice mode: the user is talking to you and hears your reply spoken aloud. "
+        "Reply in 1-3 short sentences of plain speech: no markdown, lists, tables, emoji "
+        "or code unless asked. Don't read out file paths or URLs in full. Their words "
+        "come from speech recognition, so if something sounds garbled, make a sensible "
+        "guess or ask."
+    )
+
+
 class OllamaSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
     keep_alive: str = "30m"
@@ -203,6 +235,7 @@ class Settings(BaseSettings):
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 

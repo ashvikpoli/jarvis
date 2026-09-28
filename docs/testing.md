@@ -92,6 +92,29 @@ Tick each one. **"Asks"** means an approval prompt must appear.
 | B26 | "Turn off the living room lights." | Says it can't do that yet — doesn't claim it did. |
 | B27 | "What's the Bitcoin price right now?" | Says it has no internet / doesn't know. |
 
+## Part V — Voice (Phase 4, ≈10 min)
+
+Once: `uv run jarvis voice setup` (downloads ~1.9 GB the first time).
+
+| # | Command / say | Expected |
+|---|---|---|
+| V1 | `uv run jarvis voice setup` | ✓ voice files, ✓ speech model, "Speech recognition: distil-large-v3.5 on **cuda (float16)**". |
+| V2 | `uv run jarvis voice test` | You hear Jarvis say the test sentence; round trip ≥ 80 %; then say something → it's transcribed correctly. |
+| V3 | `uv run jarvis voice voices --play` | Each voice introduces itself. |
+| V4 | `uv run jarvis voice` | "Good …, Jarvis is online." spoken. |
+| V5 | Tap **Right Ctrl**, "What time is it?" and pause | Beep, `you › What time is it?`, spoken answer with the right time. Stats line: *spoke … ms after you stopped* (target < 1000). |
+| V6 | Click into another window (browser), tap Right Ctrl, "Open Spotify" | Works without the terminal focused; Spotify opens. |
+| V7 | In that other window press **Right Ctrl + C** | Does **not** start listening. |
+| V8 | "Explain how a jet engine works in detail", then tap Right Ctrl mid-answer and say "never mind" | Stops talking at once (⏹ interrupted), listens, answers "never mind". |
+| V9 | Press Enter while Jarvis is talking | Stops talking. |
+| V10 | "Create a file called voice-test.txt on my desktop saying hello" | **Asks out loud**; say "yes" → file created. Repeat with "no" → not created. |
+| V11 | "Remind me in 1 minute to drink water" and wait | Reminder is **spoken** + Windows notification. |
+| V12 | "What's my name?" | Answers from memory (Phase 3), spoken. |
+| V13 | Type `hello` + Enter | Typed messages are answered aloud too. |
+| V14 | `/voice bm_lewis`, then `/mute`, ask something, `/unmute` | Voice changes; while muted replies are text only. |
+| V15 | Tap, then say nothing | Low beep, "(didn't hear anything)", no reply. |
+| V16 | In a 2nd window while voice mode runs: `uv run jarvis doctor` | Chat model still 100 % on GPU. |
+
 ## Part C — Records & API (≈3 min)
 
 | # | Command | Expected |
@@ -102,5 +125,5 @@ Tick each one. **"Asks"** means an approval prompt must appear.
 
 ## What to send back
 
-1. The last line of `pytest` and the eval tables (A1, A3).
+1. The last line of `pytest` and the eval tables (A1, A3), and the voice test output (V1, V2).
 2. The numbers of any checks that didn't match "Expected", with what happened.

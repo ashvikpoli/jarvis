@@ -85,6 +85,28 @@ destructive = "ask"        # overwrite / delete — always asks, "always allow" 
 # files_write = "allow"    # stop asking before creating new files
 # apps_open = "ask"        # ask before opening apps
 
+[voice]
+# `jarvis voice`: tap the hotkey, speak, and Jarvis answers out loud.
+hotkey = "ctrl_r"          # tap Right Ctrl on its own (shortcuts like Right Ctrl+C don't count).
+                           # Or a combo: "<ctrl>+<alt>+j". Key names: pynput's Key.* (f9, pause, …)
+# Hearing — faster-whisper on the GPU (falls back to the CPU if CUDA isn't working)
+stt_model = "distil-large-v3.5"   # English, fast & accurate (~1.5 GB VRAM). Multilingual: "large-v3-turbo"
+stt_device = "auto"        # auto | cuda | cpu
+language = "en"
+hotwords = "Jarvis"        # names/jargon Whisper should expect, e.g. "Jarvis Exinent Priya"
+silence_ms = 700           # pause this long and Jarvis stops listening (raise if it cuts you off)
+start_timeout_s = 6.0      # stop listening if you don't start talking within this
+max_listen_s = 30.0
+vad_threshold = 0.5        # raise (0.6–0.7) if background noise keeps it listening
+input_device = ""          # "" = Windows default mic; see: jarvis voice devices
+# Speaking — Kokoro, runs on the CPU
+speak = true
+tts_voice = "bm_george"    # British male. Hear the others: jarvis voice voices --play
+tts_speed = 1.0            # 0.8 slower … 1.3 faster
+tts_model = "kokoro-v1.0.onnx"    # or "kokoro-v1.0.fp16.onnx" (half the download)
+output_device = ""
+earcons = true             # soft beeps: listening / got it / heard nothing
+
 [providers.ollama]
 base_url = "http://127.0.0.1:11434"
 keep_alive = "30m"         # how long the model stays in VRAM after last use

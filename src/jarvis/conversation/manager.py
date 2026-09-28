@@ -84,6 +84,7 @@ class ConversationManager:
         role: str | None = None,
         options: dict[str, Any] | None = None,
         approver: Approver | None = None,
+        system_note: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Save the user message, run the agent loop, save everything it produces.
 
@@ -91,6 +92,8 @@ class ConversationManager:
         reply is saved with interrupted=True. Consume with `contextlib.aclosing` so
         that happens immediately rather than whenever the generator is collected.
         Tools that need approval are denied when no `approver` is given.
+        `system_note` is added to the system prompt (e.g. voice-mode style); keep it
+        constant for a session so the model's prompt cache stays valid.
         """
         role = role or self.role
         conv = self.get(conversation_id)
@@ -109,6 +112,8 @@ class ConversationManager:
         if ctx.memory is not None:
             recalled = await ctx.memory.prepare(history)  # stored message stays unchanged
             history, system_extra = recalled.messages, recalled.system_extra
+        if system_note:
+            system_extra = "\n\n".join(p for p in (system_note, system_extra) if p)
         built = self.prompts.build(history, extra_tokens=tool_tokens, system_extra=system_extra)
 
         def on_message(

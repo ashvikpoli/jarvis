@@ -2,12 +2,11 @@
 
 A local-first personal AI assistant for Windows, built layer by layer.
 
-**Current phase: 3 — Memory.** Jarvis remembers you across conversations — your
-name, work, people, preferences, projects — learning as you talk, and you can see,
-correct and delete everything it remembers. Built on Phase 2's tools (files, apps,
-notes, reminders — every action permission-checked and audited) and Phase 1's saved
-conversations and evals.
-Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md).
+**Current phase: 4 — Voice.** Tap **Right Ctrl**, speak, and Jarvis answers out
+loud in a British voice — everything local (faster-whisper on the GPU, Kokoro TTS).
+Built on Phase 3's long-term memory, Phase 2's tools (files, apps, notes, reminders —
+every action permission-checked and audited) and Phase 1's saved conversations and evals.
+Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md) · [phase 4](docs/phase-4.md).
 Full test checklist: [docs/testing.md](docs/testing.md).
 
 ## Setup (Windows, native — not WSL)
@@ -31,6 +30,9 @@ We run natively on Windows because later phases control the Windows desktop.
    ollama pull qwen3-embedding:0.6b   # 639 MB; lets memory search by meaning
    uv run jarvis doctor      # everything should be green
    uv run jarvis chat
+   uv run jarvis voice setup # voice models: ~350 MB voice + ~1.5 GB speech recognition
+   uv run jarvis voice test  # hear Jarvis, check the mic
+   uv run jarvis voice       # talk: tap Right Ctrl, speak, pause
    ```
 
 ## Usage
@@ -42,6 +44,11 @@ uv run jarvis chat --resume 3               # continue conversation #3
 uv run jarvis chat --model ollama:qwen3:14b # try another model
 uv run jarvis chat --show-thinking          # turn reasoning on and show it
 uv run jarvis chat --echo                   # offline, no model needed
+uv run jarvis voice                         # voice mode (--resume, --voice bm_lewis, --no-speak)
+uv run jarvis voice setup | test            # download voice models | self-test speakers, Whisper, mic
+uv run jarvis voice say "Hello sir"         # hear a sentence (--save hello.wav)
+uv run jarvis voice voices --play           # hear the voices
+uv run jarvis voice devices                 # microphones & speakers
 uv run jarvis history                       # list conversations
 uv run jarvis history 3                     # print conversation #3
 uv run jarvis eval                          # score the chat model on evals/cases.toml
@@ -73,6 +80,27 @@ Stream from the API:
 curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
   -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'
 ```
+
+## Voice (Phase 4)
+
+`uv run jarvis voice`, then **tap Right Ctrl** (from any app — the terminal doesn't
+need focus), speak, and pause: Jarvis stops listening by itself after ~0.7 s of quiet
+and answers out loud. **Tap again while it's talking** to cut it off and speak;
+press **Enter** to just stop it. Typing still works and is answered aloud.
+
+- Everything works as in chat — tools, memory, reminders (spoken too). When
+  something needs your OK, Jarvis asks out loud: say *"yes"*, *"no"* or *"always"*,
+  or type `y` / `n` / `a`.
+- After each turn: `heard in 180 ms · answer in 40 ms · spoke 650 ms after you
+  stopped` — the last number is the delay you feel.
+- Only a clean tap counts: Right Ctrl + C in another app doesn't start listening.
+  Change the key in `[voice] hotkey` (e.g. `"f9"` or `"<ctrl>+<alt>+j"`).
+- Voice: `bm_george` (British male). Hear the others with `jarvis voice voices --play`;
+  switch with `/voice bm_lewis` or `[voice] tts_voice`.
+- If it cuts you off mid-sentence, raise `[voice] silence_ms` (e.g. 1000). If noise
+  keeps it listening, raise `vad_threshold` to 0.6–0.7.
+- Speech recognition runs on the GPU (~1.5 GB VRAM) and falls back to the CPU if
+  CUDA isn't working — `jarvis voice setup` says which.
 
 ## Memory (Phase 3)
 
@@ -150,7 +178,8 @@ Smart App Control (it can't be re-enabled without a reset).
 Env vars override everything: `$env:JARVIS_MODELS__ROLES__CHAT = "ollama:qwen3:8b"`.
 
 Data lives in `data/` (git-ignored): `jarvis.db` (conversations, memories, notes, reminders),
-`logs/jarvis.log` (JSON lines with latency for every reply), `evals/` (eval results).
+`logs/jarvis.log` (JSON lines with latency for every reply), `evals/` (eval results),
+`models/` (voice models).
 
 ## Layout
 
@@ -163,6 +192,7 @@ src/jarvis/
   conversation/       ConversationManager, PromptBuilder (context window)
   agent/              AgentLoop: model ⇄ tools, permissions, audit
   memory/             long-term memory: store, embeddings, recall, background learning
+  voice/              mic + VAD, Whisper STT, Kokoro TTS, hotkey, VoiceSession
   tools/              tool framework + files, system/apps, notes/reminders, memory
   evals/              eval checks + runner
   interfaces/         cli.py, api.py
@@ -172,5 +202,5 @@ evals/cases.toml      eval cases — add one whenever Jarvis gets something wron
 ## Roadmap
 
 0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions ✅ · 3 Memory (testing) ·
-4 Voice MVP · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
+4 Voice MVP (testing) · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
 8 Polish + packaging

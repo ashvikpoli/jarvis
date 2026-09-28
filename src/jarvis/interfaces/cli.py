@@ -8,10 +8,12 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import aclosing
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
@@ -566,6 +568,375 @@ def cmd_notify(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- voice
+
+VOICE_TEST_PHRASE = "Jarvis, remind me to call Priya at six thirty tomorrow evening."
+
+
+def _greeting() -> str:
+    from datetime import datetime
+
+    hour = datetime.now().hour
+    part = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+    return f"Good {part}. Jarvis is online."
+
+
+def _voice_setup(settings: Settings) -> int:
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn
+
+    from jarvis.voice import components as vc
+    from jarvis.voice.tts import download_models, missing_files
+
+    v = settings.voice
+    kdir = vc.kokoro_dir(settings)
+    missing = missing_files(kdir, v.tts_model)
+    if missing:
+        console.print(f"Downloading the voice ({', '.join(missing)}) …")
+        with Progress(
+            TextColumn("{task.description}"), BarColumn(), DownloadColumn(), console=console
+        ) as progress:
+            tasks: dict[str, int] = {}
+
+            def report(name: str, done: int, total: int) -> None:
+                if name not in tasks:
+                    tasks[name] = progress.add_task(name, total=total or None)
+                progress.update(tasks[name], completed=done)
+
+            download_models(kdir, v.tts_model, report)
+    console.print(f"[green]✓[/] Voice files in {kdir}")
+
+    if vc.whisper_downloaded(settings):
+        console.print(f"[green]✓[/] Speech model {v.stt_model} already downloaded")
+    else:
+        console.print(f"Downloading the speech model {v.stt_model} (~1.5 GB, once) …")
+        vc.download_whisper(settings)
+        console.print(f"[green]✓[/] Speech model in {vc.whisper_dir(settings)}")
+
+    stt = vc.make_stt(settings)
+    with console.status("Loading the speech model (GPU if possible)…"):
+        stt.load()
+    console.print(f"[green]✓[/] Speech recognition: {stt.describe()}")
+    if stt.fallback_reason:
+        console.print(f"[yellow]  GPU didn't work, using the CPU: {stt.fallback_reason}[/]")
+    console.print(
+        "\nAll set. Next: [bold]uv run jarvis voice test[/], then [bold]uv run jarvis voice[/]"
+    )
+    return 0
+
+
+def _voice_say(settings: Settings, text: str, voice: str | None, save: Path | None) -> int:
+    from jarvis.voice import components as vc
+
+    tts = vc.make_tts(settings)
+    if voice:
+        tts.voice = voice
+    t0 = time.perf_counter()
+    audio = tts.synthesize(text)
+    ms = (time.perf_counter() - t0) * 1000
+    secs = len(audio) / tts.sample_rate
+    console.print(f"[dim]{tts.voice}: {secs:.1f} s of speech made in {ms:.0f} ms[/]")
+    if save:
+        vc.save_wav(save, audio, tts.sample_rate)
+        console.print(f"Saved {save.resolve()}")
+        return 0
+    speaker = vc.make_speaker(settings)
+    speaker.play(audio, tts.sample_rate)
+    speaker.wait(secs + 5)
+    time.sleep(0.2)
+    speaker.close()
+    return 0
+
+
+def _voice_voices(settings: Settings, play: bool) -> int:
+    from jarvis.voice import components as vc
+    from jarvis.voice.tts import VOICES
+
+    current = settings.voice.tts_voice
+    speaker = tts = None
+    if play:
+        tts = vc.make_tts(settings)
+        speaker = vc.make_speaker(settings)
+    for name, about in VOICES.items():
+        mark = "[green]●[/]" if name == current else " "
+        console.print(f" {mark} [bold]{name:<12}[/] {about}", highlight=False)
+        if play:
+            audio = tts.synthesize(f"Hello, I'm {name.split('_')[1].title()}.", voice=name)
+            speaker.play(audio, tts.sample_rate)
+            speaker.wait(10)
+    if speaker:
+        speaker.close()
+    console.print(
+        '\n[dim]Change it in config/local.toml:  [voice] tts_voice = "bm_lewis"   '
+        "· hear them: jarvis voice voices --play · or /voice NAME in voice mode[/]"
+    )
+    return 0
+
+
+def _voice_devices() -> int:
+    from jarvis.voice.audio import list_devices
+
+    table = Table(header_style="bold", box=None, padding=(0, 2))
+    for col in ("#", "Device", "API", "In", "Out", "Rate"):
+        table.add_column(col)
+    for d in list_devices():
+        mark = " [green](default in)[/]" if d["default_input"] else ""
+        mark += " [green](default out)[/]" if d["default_output"] else ""
+        table.add_row(
+            str(d["index"]),
+            d["name"] + mark,
+            d["hostapi"],
+            str(d["inputs"]),
+            str(d["outputs"]),
+            f"{d['rate']:.0f}",
+        )
+    console.print(table)
+    console.print(
+        '[dim]Pick one in config/local.toml:  [voice] input_device = "3"  (or part of its name)[/]'
+    )
+    return 0
+
+
+def _voice_test(settings: Settings, mic_test: bool) -> int:
+    import threading
+
+    from jarvis.voice import components as vc
+    from jarvis.voice.audio import SAMPLE_RATE, resample, rms
+    from jarvis.voice.stt import STTError
+    from jarvis.voice.tts import TTSError
+
+    ok = True
+    try:
+        tts = vc.make_tts(settings)
+        with console.status("Loading the voice…"):
+            tts.load()
+            tts.synthesize("warm up")
+        t0 = time.perf_counter()
+        audio = tts.synthesize(VOICE_TEST_PHRASE)
+        synth_ms = (time.perf_counter() - t0) * 1000
+        secs = len(audio) / tts.sample_rate
+        console.print(
+            f"[green]✓[/] Voice {tts.voice}: {secs:.1f} s of speech in {synth_ms:.0f} ms "
+            f"({secs * 1000 / synth_ms:.0f}× real time)"
+        )
+    except TTSError as e:
+        console.print(f"[red]✗ {e}[/]")
+        return 1
+
+    speaker = vc.make_speaker(settings)
+    try:
+        console.print("[dim]Playing it now — you should hear Jarvis…[/]")
+        speaker.play(audio, tts.sample_rate)
+        speaker.wait(secs + 5)
+        console.print("[green]✓[/] Speakers")
+    except Exception as e:
+        console.print(f"[red]✗ speakers: {e}[/]")
+        ok = False
+
+    stt = vc.make_stt(settings)
+    try:
+        with console.status("Loading the speech model…"):
+            t0 = time.perf_counter()
+            stt.load()
+            load_s = time.perf_counter() - t0
+        console.print(
+            f"[green]✓[/] Speech recognition: {stt.describe()} (loaded in {load_s:.1f} s)"
+        )
+        if stt.fallback_reason:
+            console.print(f"[yellow]  GPU failed, on CPU instead: {stt.fallback_reason}[/]")
+        result = stt.transcribe(resample(audio, tts.sample_rate, SAMPLE_RATE))
+        acc = vc.word_accuracy(VOICE_TEST_PHRASE, result.text)
+        good = acc >= 0.8
+        ok = ok and good
+        console.print(
+            f"{'[green]✓[/]' if good else '[red]✗[/]'} Round trip (voice → speech model): "
+            f"{acc:.0%} of words, {result.ms:.0f} ms\n    heard: {escape(result.text)!r}"
+        )
+    except STTError as e:
+        console.print(f"[red]✗ {e}[/]")
+        return 1
+
+    if mic_test:
+        mic = vc.make_mic(settings)
+        try:
+            from jarvis.voice.vad import EndpointConfig
+
+            mic.start()
+            console.print(
+                "\n[bold]Microphone:[/] say something, e.g. [italic]“What's the time?”[/] "
+                "(I'll stop when you pause)"
+            )
+            beep = speaker.earcon("listen")
+            cfg = EndpointConfig(
+                threshold=settings.voice.vad_threshold,
+                silence_ms=settings.voice.silence_ms,
+                start_timeout_s=8,
+            )
+            clip = mic.record(
+                threading.Event(), cfg, seed=False, mute_s=beep + speaker.latency + 0.05
+            )
+            if clip is None:
+                console.print(
+                    "[red]✗ didn't hear any speech.[/] Check the mic in Windows sound "
+                    "settings, or pick one: jarvis voice devices"
+                )
+                ok = False
+            else:
+                result = stt.transcribe(clip)
+                console.print(
+                    f"[green]✓[/] Heard {len(clip) / SAMPLE_RATE:.1f} s (level {rms(clip):.3f}) "
+                    f"in {result.ms:.0f} ms: [bold]{escape(result.text) or '(nothing clear)'}[/]"
+                )
+        except Exception as e:
+            console.print(f"[red]✗ microphone: {e}[/]")
+            ok = False
+        finally:
+            mic.close()
+    speaker.close()
+    console.print(
+        "\n"
+        + (
+            "[green]Voice is ready.[/] Run: uv run jarvis voice"
+            if ok
+            else "[yellow]Some checks failed.[/]"
+        )
+    )
+    return 0 if ok else 1
+
+
+def cmd_voice(settings: Settings, args: argparse.Namespace) -> int:
+    action = args.action or "start"
+    if args.voice:
+        settings.voice.tts_voice = args.voice
+    try:
+        if action == "setup":
+            return _voice_setup(settings)
+        if action == "say":
+            return _voice_say(settings, " ".join(args.rest) or _greeting(), args.voice, args.save)
+        if action == "voices":
+            return _voice_voices(settings, args.play)
+        if action == "devices":
+            return _voice_devices()
+        if action == "test":
+            return _voice_test(settings, not args.no_mic)
+    except Exception as e:  # missing models, audio, CUDA … show it plainly
+        console.print(f"[red]✗ {e}[/]")
+        return 1
+    return _voice_start(settings, args)
+
+
+def _voice_start(settings: Settings, args: argparse.Namespace) -> int:
+    from jarvis.voice import components as vc
+    from jarvis.voice.hotkey import Hotkey, describe
+    from jarvis.voice.session import VoiceSession
+    from jarvis.voice.tts import SpeechQueue, missing_files
+
+    v = settings.voice
+    if args.no_speak:
+        v.speak = False
+    if missing_files(vc.kokoro_dir(settings), v.tts_model) or not vc.whisper_downloaded(settings):
+        console.print("[yellow]Voice isn't set up yet.[/] Run: [bold]uv run jarvis voice setup[/]")
+        return 1
+
+    app = JarvisApp.create(settings)
+    if args.model:
+        app.models.set_role("chat", args.model)
+    conv = None
+    if args.resume:
+        try:
+            conv = (
+                app.store.latest()
+                if args.resume == "last"
+                else app.conversations.get(int(args.resume))
+            )
+        except (ConversationNotFound, ValueError) as e:
+            console.print(f"[red]✗ {e}[/]")
+            return 1
+
+    stt, tts = vc.make_stt(settings), vc.make_tts(settings)
+    mic, speaker = vc.make_mic(settings), vc.make_speaker(settings)
+    speech = None
+    code = 0
+    with asyncio.Runner() as runner:
+        try:
+            with console.status("Loading the language model into VRAM…"):
+                runner.run(app.models.warmup("chat"))
+            with console.status("Loading speech recognition…"):
+                stt.load()
+            with console.status("Loading the voice…"):
+                tts.load()
+                tts.synthesize("ready")
+            mic.start()
+            speaker.start()
+        except Exception as e:
+            console.print(f"[red]✗ {e}[/]\n[dim]Try: uv run jarvis voice test[/]")
+            runner.run(app.aclose())
+            mic.close()
+            speaker.close()
+            return 1
+
+        speech = SpeechQueue(tts, speaker)
+        session = VoiceSession(
+            app,
+            v,
+            stt=stt,
+            mic=mic,
+            speech=speech,
+            console=console,
+            hotkey_factory=Hotkey,
+            conversation=conv,
+            voice_names=lambda: list(tts.voices()),
+        )
+
+        def on_reminder(title: str, msg: str) -> None:  # scheduler thread
+            console.print(f"\n[bold magenta]⏰ Reminder: {msg}[/]")
+            session.post("reminder", msg)  # spoken when Jarvis isn't listening/talking
+
+        app.notifier.add(CallbackNotifier(on_reminder))
+        app.scheduler.start()
+        app.apps.prefetch()
+        try:
+            runner.run(app.memory.backfill())
+        except ProviderError:
+            pass
+        app.memory_listeners.append(_print_memory_changes)
+
+        key = describe(v.hotkey)
+        console.print(
+            f"[bold]{settings.app.name}[/] v{__version__} · voice mode · "
+            f"model [cyan]{app.models.roles['chat']}[/] · hearing: {stt.describe()} · "
+            f"voice: {tts.voice}"
+        )
+        if conv:
+            console.print(f"[dim]Resuming #{conv.id}: {conv.title or '(untitled)'}[/]")
+        console.print(
+            f"[bold]Tap {key}[/] and speak — I'll stop listening when you pause. "
+            f"Tap {key} while I'm talking to cut me off. Typing works too. [dim](/help)[/]"
+        )
+        if stt.fallback_reason:
+            console.print(
+                f"[yellow]Speech recognition is on the CPU (GPU failed): {stt.fallback_reason}[/]"
+            )
+
+        try:
+            runner.run(session.run(greeting=_greeting()))
+        except KeyboardInterrupt:
+            pass
+        except RuntimeError as e:  # e.g. hotkeys unavailable
+            console.print(f"[red]✗ {e}[/]")
+            code = 1
+        finally:
+            speech.close()
+            mic.close()
+            speaker.close()
+            runner.run(app.aclose())
+    if session.conv:
+        console.print(
+            f"[dim]Saved as #{session.conv.id}. "
+            f"Continue: jarvis voice --resume {session.conv.id}[/]"
+        )
+    return code
+
+
 # ---------------------------------------------------------------- serve
 
 
@@ -604,6 +975,37 @@ def _gpu_info() -> str | None:
         return None
 
 
+def _voice_doctor_rows(settings: Settings) -> list[tuple[str, bool | None, str]]:
+    """Cheap checks only (no model loading) — `jarvis voice test` does the real thing."""
+    from jarvis.voice import components as vc
+    from jarvis.voice.tts import missing_files
+
+    rows: list[tuple[str, bool | None, str]] = []
+    v = settings.voice
+    try:
+        from jarvis.voice.audio import default_device_names
+
+        mic, out = default_device_names()
+        rows.append(
+            ("Voice: audio", bool(mic and out), f"mic: {mic or 'none!'} · out: {out or 'none!'}")
+        )
+    except Exception as e:
+        rows.append(("Voice: audio", False, str(e)))
+    have_stt = vc.whisper_downloaded(settings)
+    have_tts = not missing_files(vc.kokoro_dir(settings), v.tts_model)
+    if not (have_stt and have_tts):
+        rows.append(("Voice: models", None, "not set up yet — run: jarvis voice setup"))
+        return rows
+    detail = f"hearing {v.stt_model} · voice {v.tts_voice}"
+    if sys.platform == "win32":
+        from jarvis.voice.stt import cuda_library_dirs
+
+        n = len(cuda_library_dirs())
+        detail += f" · CUDA libs {'found' if n else 'missing (speech runs on CPU)'}"
+    rows.append(("Voice: models", True, detail + "  (full check: jarvis voice test)"))
+    return rows
+
+
 async def _doctor(settings: Settings, quick: bool) -> list[tuple[str, bool | None, str]]:
     rows: list[tuple[str, bool | None, str]] = []
     py_ok = sys.version_info >= (3, 11)
@@ -625,6 +1027,7 @@ async def _doctor(settings: Settings, quick: bool) -> list[tuple[str, bool | Non
         )
     )
     rows.append(("Tools", True, f"{len(app.registry)} enabled  (see: jarvis tools)"))
+    rows.extend(_voice_doctor_rows(settings))
     try:
         ref = app.models.roles["chat"]
         rows.append(("Chat model", True, str(ref)))
@@ -759,6 +1162,21 @@ def build_parser() -> argparse.ArgumentParser:
     mem.add_argument("action", nargs="?", choices=["list", "search", "forget", "clear", "export"])
     mem.add_argument("rest", nargs="*")
 
+    vp = sub.add_parser(
+        "voice", help="talk to Jarvis: voice [setup | test | say TEXT | voices | devices]"
+    )
+    vp.add_argument(
+        "action", nargs="?", choices=["start", "setup", "test", "say", "voices", "devices"]
+    )
+    vp.add_argument("rest", nargs="*", help="text for `say`")
+    vp.add_argument("--voice", help="Kokoro voice, e.g. bm_george (see: jarvis voice voices)")
+    vp.add_argument("--model", help="override chat model")
+    vp.add_argument("--resume", nargs="?", const="last", metavar="ID")
+    vp.add_argument("--no-speak", action="store_true", help="listen, but reply in text only")
+    vp.add_argument("--no-mic", action="store_true", help="test: skip the microphone check")
+    vp.add_argument("--play", action="store_true", help="voices: hear each one")
+    vp.add_argument("--save", type=Path, help="say: write a .wav instead of playing")
+
     sub.add_parser("tools", help="list tools and their permissions")
     a = sub.add_parser("audit", help="recent tool calls")
     a.add_argument("--limit", type=int, default=30)
@@ -793,6 +1211,7 @@ def main(argv: list[str] | None = None) -> int:
         "reminders": cmd_reminders,
         "apps": cmd_apps,
         "notify": cmd_notify,
+        "voice": cmd_voice,
     }
     return handlers[args.command](settings, args)
 
