@@ -23,10 +23,14 @@ class ModelProvider(ABC):
         model: str,
         *,
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion.
 
-        Contract: yields text/thinking chunks, then exactly one chunk with done=True
+        `tools` are function specs ({"type": "function", "function": {...}}); if the
+        model wants to call some, they arrive as a chunk with `tool_calls` set.
+
+        Contract: yields text/thinking/tool_calls chunks, then exactly one chunk with done=True
         (carrying Usage if available). Must stop promptly and release resources if
         the consuming task is cancelled.
         """

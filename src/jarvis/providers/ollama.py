@@ -11,10 +11,42 @@ from typing import Any
 import httpx
 
 from jarvis.core.config import OllamaSettings
-from jarvis.core.types import LoadedModel, Message, ProviderHealth, StreamChunk, Usage
+from jarvis.core.types import (
+    LoadedModel,
+    Message,
+    ProviderHealth,
+    StreamChunk,
+    ToolCall,
+    Usage,
+)
 from jarvis.providers.base import ModelProvider, ProviderError
 
 log = logging.getLogger(__name__)
+
+
+def _to_ollama(m: Message) -> dict[str, Any]:
+    out: dict[str, Any] = {"role": m.role, "content": m.content}
+    if m.tool_calls:
+        out["tool_calls"] = [
+            {"function": {"name": c.name, "arguments": c.arguments}} for c in m.tool_calls
+        ]
+    if m.role == "tool" and m.tool_name:
+        out["tool_name"] = m.tool_name
+    return out
+
+
+def _parse_call(raw: dict[str, Any]) -> ToolCall:
+    fn = raw.get("function") or {}
+    args = fn.get("arguments") or {}
+    if isinstance(args, str):  # some models return a JSON string
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {"_raw": args}
+    kw: dict[str, Any] = {"name": fn.get("name", ""), "arguments": args}
+    if raw.get("id"):
+        kw["id"] = str(raw["id"])
+    return ToolCall(**kw)
 
 
 class OllamaProvider(ModelProvider):
@@ -34,6 +66,7 @@ class OllamaProvider(ModelProvider):
         model: str,
         *,
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         opts = dict(options or {})
         # `think` and `keep_alive` are top-level request fields in Ollama; everything
@@ -41,7 +74,7 @@ class OllamaProvider(ModelProvider):
         think = opts.pop("think", self.settings.think)
         body: dict[str, Any] = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [_to_ollama(m) for m in messages],
             "stream": True,
             "keep_alive": opts.pop("keep_alive", self.settings.keep_alive),
         }
@@ -49,6 +82,8 @@ class OllamaProvider(ModelProvider):
             body["options"] = opts
         if think is not None:
             body["think"] = think
+        if tools:
+            body["tools"] = tools
 
         start = time.perf_counter()
         ttft: float | None = None
@@ -75,6 +110,8 @@ class OllamaProvider(ModelProvider):
                         answer_ttft = now_ms
                     if text or thinking:
                         yield StreamChunk(text=text, thinking=thinking)
+                    if raw_calls := msg.get("tool_calls"):
+                        yield StreamChunk(tool_calls=[_parse_call(c) for c in raw_calls])
                     if data.get("done"):
                         yield StreamChunk(
                             done=True,

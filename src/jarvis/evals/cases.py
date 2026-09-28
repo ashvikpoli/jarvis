@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from jarvis.core.config import REPO_ROOT
-from jarvis.core.types import Message
+from jarvis.core.types import Message, ToolCall
 
 DEFAULT_CASES = REPO_ROOT / "evals" / "cases.toml"
 
@@ -26,6 +26,13 @@ class Checks(BaseModel):
     number: float | None = None  # this number must appear (commas/decimals tolerated)
     json_keys: list[str] | None = None  # reply must contain a JSON object with these keys
     no_markdown: bool = False  # no **bold**, # headings, bullet lists, code fences
+    # tool use (evals run with tools in a sandbox)
+    tools_called: list[str] = Field(default_factory=list)  # every one of these was called
+    tools_called_any: list[str] = Field(default_factory=list)  # at least one was called
+    tools_not_called: list[str] = Field(default_factory=list)
+    no_tools: bool = False  # answered without calling any tool
+    # {"reminders_set": {"text": "stretch"}}: some call's arg contains the substring
+    tool_args: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class EvalCase(BaseModel):
@@ -80,15 +87,40 @@ def _find_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
-def run_checks(reply: str, checks: Checks) -> list[str]:
+def _tool_failures(calls: list[ToolCall], checks: Checks) -> list[str]:
+    fails = []
+    names = [c.name for c in calls]
+    if missing := [t for t in checks.tools_called if t not in names]:
+        fails.append(f"didn't call {missing} (called {names or 'nothing'})")
+    if checks.tools_called_any and not set(checks.tools_called_any) & set(names):
+        fails.append(f"called none of {checks.tools_called_any} (called {names or 'nothing'})")
+    if wrong := [t for t in checks.tools_not_called if t in names]:
+        fails.append(f"shouldn't have called {wrong}")
+    if checks.no_tools and names:
+        fails.append(f"used tools unnecessarily: {names}")
+    for tool, expected in checks.tool_args.items():
+        candidates = [c for c in calls if c.name == tool]
+        ok = any(
+            all(
+                sub.lower() in str(c.arguments.get(key, "")).lower()
+                for key, sub in expected.items()
+            )
+            for c in candidates
+        )
+        if candidates and not ok:
+            fails.append(f"{tool} args {[c.arguments for c in candidates]} don't match {expected}")
+    return fails
+
+
+def run_checks(reply: str, checks: Checks, tool_calls: list[ToolCall] | None = None) -> list[str]:
     """Return a list of failure reasons (empty = pass)."""
     text = clean_reply(reply)
     low = text.lower()
     words = len(text.split())
-    fails: list[str] = []
+    fails: list[str] = _tool_failures(tool_calls or [], checks)
 
     if not text:
-        return ["empty reply"]
+        return [*fails, "empty reply"]
     missing = [p for p in checks.contains_all if p.lower() not in low]
     if missing:
         fails.append(f"missing {missing}")

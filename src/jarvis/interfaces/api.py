@@ -70,6 +70,17 @@ async def _respond(make_stream: Callable[[], AsyncIterator[StreamChunk]], stream
                         yield _sse({"type": "thinking", "text": chunk.thinking})
                     if chunk.text:
                         yield _sse({"type": "token", "text": chunk.text})
+                    if ev := chunk.event:
+                        yield _sse(
+                            {
+                                "type": "tool_call" if ev.kind == "call" else "tool_result",
+                                "status": ev.kind,
+                                "id": ev.call.id,
+                                "name": ev.call.name,
+                                "arguments": ev.call.arguments,
+                                "output": ev.output,
+                            }
+                        )
                     if chunk.done:
                         usage = chunk.usage.model_dump() if chunk.usage else None
                         yield _sse({"type": "done", "usage": usage})
@@ -84,6 +95,8 @@ def create_api(settings: Settings | None = None, jarvis: JarvisApp | None = None
     async def lifespan(api: FastAPI):
         owned = jarvis is None
         api.state.jarvis = jarvis or JarvisApp.create(settings or load_settings())
+        if owned:
+            api.state.jarvis.scheduler.start()  # reminders fire while the server runs
         yield
         if owned:
             await api.state.jarvis.aclose()
@@ -161,8 +174,26 @@ def create_api(settings: Settings | None = None, jarvis: JarvisApp | None = None
         if not get_jarvis(request).store.delete(conversation_id):
             raise HTTPException(404, f"No conversation with id {conversation_id}")
 
+    @api.get("/v1/tools")
+    async def list_tools(request: Request):
+        j = get_jarvis(request)
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "risk": str(t.risk),
+                "permission": str(j.policy.overrides.get(t.name) or j.policy.risk_defaults[t.risk]),
+            }
+            for t in j.registry.tools
+        ]
+
+    @api.get("/v1/audit")
+    async def audit(request: Request, limit: int = 50):
+        return get_jarvis(request).audit.recent(limit)
+
     @api.post("/v1/conversations/{conversation_id}/messages")
     async def send_message(conversation_id: int, body: SendMessage, request: Request):
+        # No approval UI over HTTP yet: tools that would ask are denied.
         j = get_jarvis(request)
         get_conversation(j, conversation_id)
         check_role(j, j.conversations.role)

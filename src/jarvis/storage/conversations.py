@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
-from jarvis.core.types import Message, Role, Usage
+from jarvis.core.types import Message, Role, ToolCall, Usage
 from jarvis.storage.db import Database
 
 
@@ -35,9 +36,25 @@ class StoredMessage(BaseModel):
     ttft_ms: float | None = None
     answer_ttft_ms: float | None = None
     interrupted: bool = False
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+
+    @field_validator("tool_calls", mode="before")
+    @classmethod
+    def _parse_tool_calls(cls, v):
+        if v is None or v == "":
+            return []
+        return json.loads(v) if isinstance(v, str) else v
 
     def to_message(self) -> Message:
-        return Message(role=self.role, content=self.content)
+        return Message(
+            role=self.role,
+            content=self.content,
+            tool_calls=self.tool_calls,
+            tool_name=self.tool_name,
+            tool_call_id=self.tool_call_id,
+        )
 
 
 _CONV_SELECT = """
@@ -99,15 +116,19 @@ class ConversationStore:
         model: str | None = None,
         usage: Usage | None = None,
         interrupted: bool = False,
+        tool_calls: list[ToolCall] | None = None,
+        tool_name: str | None = None,
+        tool_call_id: str | None = None,
     ) -> StoredMessage:
         now = _now()
         u = usage or Usage()
+        calls_json = json.dumps([c.model_dump() for c in tool_calls]) if tool_calls else None
         with self.db.lock, self.db.conn:
             cur = self.db.conn.execute(
                 """INSERT INTO messages (conversation_id, role, content, thinking, created_at,
                        model, prompt_tokens, completion_tokens, ttft_ms, answer_ttft_ms,
-                       interrupted)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       interrupted, tool_calls, tool_name, tool_call_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     conversation_id,
                     role,
@@ -120,6 +141,9 @@ class ConversationStore:
                     u.ttft_ms,
                     u.answer_ttft_ms,
                     int(interrupted),
+                    calls_json,
+                    tool_name,
+                    tool_call_id,
                 ),
             )
             self.db.conn.execute(
@@ -129,6 +153,18 @@ class ConversationStore:
                 "SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)
             ).fetchone()
         return StoredMessage(**dict(row))
+
+    def add(self, conversation_id: int, message: Message, **kw) -> StoredMessage:
+        """Store a core Message (convenience for the agent loop)."""
+        return self.add_message(
+            conversation_id,
+            message.role,
+            message.content,
+            tool_calls=message.tool_calls,
+            tool_name=message.tool_name,
+            tool_call_id=message.tool_call_id,
+            **kw,
+        )
 
     def messages(self, conversation_id: int) -> list[StoredMessage]:
         with self.db.lock:

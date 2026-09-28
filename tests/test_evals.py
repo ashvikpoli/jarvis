@@ -61,7 +61,9 @@ class ScriptedProvider(ModelProvider):
         self.answers = answers
         self.unloaded: list[str] = []
 
-    async def stream_chat(self, messages, model, *, options=None) -> AsyncIterator[StreamChunk]:
+    async def stream_chat(
+        self, messages, model, *, options=None, tools=None
+    ) -> AsyncIterator[StreamChunk]:
         reply = self.answers.get(messages[-1].content, "no idea")
         yield StreamChunk(text=reply)
         yield StreamChunk(
@@ -110,3 +112,47 @@ async def test_runner_scores_and_reports(tmp_path):
 
     path = save_results([result], tmp_path / "evals")
     assert path.exists() and '"pass_rate": 0.5' in path.read_text()
+
+
+def test_tool_checks():
+    from jarvis.core.types import ToolCall
+
+    calls = [ToolCall(name="reminders_set", arguments={"text": "Stretch now", "in_minutes": 10})]
+    ok = Checks(tools_called=["reminders_set"], tool_args={"reminders_set": {"text": "stretch"}})
+    assert run_checks("Done.", ok, calls) == []
+    assert run_checks("Done.", Checks(tools_called=["notes_add"]), calls)
+    assert run_checks("Done.", Checks(tools_called_any=["notes_add", "reminders_set"]), calls) == []
+    assert run_checks("Done.", Checks(tools_not_called=["reminders_set"]), calls)
+    assert run_checks("Done.", Checks(no_tools=True), calls)
+    assert run_checks("Done.", Checks(no_tools=True), []) == []
+    bad_args = Checks(tool_args={"reminders_set": {"text": "dentist"}})
+    assert "don't match" in run_checks("Done.", bad_args, calls)[0]
+
+
+async def test_runner_uses_sandboxed_tools(tmp_path):
+    from jarvis.core.types import ToolCall
+    from jarvis.providers.scripted import ScriptedProvider
+
+    (tmp_path / "default.toml").write_text('[models]\nroles = { chat = "scripted:main" }\n')
+    provider = ScriptedProvider(
+        [
+            [ToolCall(name="files_read", arguments={"path": "Desktop/todo.txt"})],
+            "You need to buy milk.",
+        ]
+    )
+    app = JarvisApp.create(
+        load_settings(tmp_path), providers={"scripted": provider}, db_path=":memory:", file_roots=[]
+    )
+    case = EvalCase(
+        id="todo",
+        category="tools",
+        prompt="what's on my todo?",
+        checks=Checks(tools_called=["files_read"], contains_all=["milk"]),
+    )
+    result = await EvalRunner(app).run_model("scripted:main", [case])
+    await app.aclose()
+    r = result.cases[0]
+    assert r.passed, r.failures
+    assert r.tool_calls[0].startswith("files_read")
+    # the tool really read the sandbox fixture, not the user's disk
+    assert "buy milk" in provider.calls[1]["messages"][-1].content

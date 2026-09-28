@@ -37,6 +37,45 @@ class ConversationSettings(BaseModel):
     include_datetime: bool = True
 
 
+# Jarvis's own data and opening things are low-risk, so they don't ask by default.
+DEFAULT_PERMISSION_OVERRIDES = {
+    "notes_add": "allow",
+    "reminders_set": "allow",
+    "reminders_update": "allow",
+    "reminders_cancel": "allow",
+    "apps_open": "allow",
+    "web_open": "allow",
+    "web_search": "allow",
+}
+
+
+class ToolPermissions(BaseModel):
+    safe: str = "allow"
+    change: str = "ask"
+    destructive: str = "ask"
+    # tool name -> allow|ask|deny. Your entries are merged over the defaults.
+    overrides: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def effective_overrides(self) -> dict[str, str]:
+        return {**DEFAULT_PERMISSION_OVERRIDES, **self.overrides}
+
+
+class FileToolSettings(BaseModel):
+    # Known folder names (resolved via Windows, OneDrive-aware) or explicit paths.
+    roots: list[str] = Field(default_factory=lambda: ["Documents", "Desktop", "Downloads"])
+    max_read_chars: int = 20_000
+
+
+class ToolsSettings(BaseModel):
+    enabled: bool = True
+    max_steps: int = 6
+    disabled: list[str] = Field(default_factory=list)  # tool names to leave out entirely
+    permissions: ToolPermissions = Field(default_factory=ToolPermissions)
+    files: FileToolSettings = Field(default_factory=FileToolSettings)
+    notifications: bool = True
+
+
 class OllamaSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
     keep_alive: str = "30m"
@@ -101,6 +140,7 @@ class Settings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     models: ModelsSettings = Field(default_factory=ModelsSettings)
     conversation: ConversationSettings = Field(default_factory=ConversationSettings)
+    tools: ToolsSettings = Field(default_factory=ToolsSettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 

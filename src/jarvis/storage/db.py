@@ -37,6 +37,43 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_messages_conversation ON messages(conversation_id, id);
     CREATE INDEX idx_conversations_updated ON conversations(updated_at);
     """,
+    # 2 — tools: tool calls on messages, audit log, notes, reminders
+    """
+    ALTER TABLE messages ADD COLUMN tool_calls TEXT;     -- JSON list of ToolCall
+    ALTER TABLE messages ADD COLUMN tool_name TEXT;
+    ALTER TABLE messages ADD COLUMN tool_call_id TEXT;
+
+    CREATE TABLE tool_calls (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id  INTEGER,
+        call_id          TEXT,
+        tool             TEXT NOT NULL,
+        arguments        TEXT NOT NULL,   -- JSON
+        risk             TEXT NOT NULL,
+        decision         TEXT NOT NULL,   -- allowed | approved | approved_session | denied
+        ok               INTEGER NOT NULL,
+        output           TEXT,
+        duration_ms      REAL,
+        created_at       TEXT NOT NULL
+    );
+    CREATE INDEX idx_tool_calls_created ON tool_calls(created_at);
+
+    CREATE TABLE notes (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        text        TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE reminders (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        text        TEXT NOT NULL,
+        due_at      TEXT NOT NULL,        -- UTC ISO-8601
+        status      TEXT NOT NULL DEFAULT 'pending',  -- pending | fired | cancelled
+        created_at  TEXT NOT NULL,
+        fired_at    TEXT
+    );
+    CREATE INDEX idx_reminders_due ON reminders(status, due_at);
+    """,
 ]
 
 

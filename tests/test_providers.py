@@ -186,3 +186,59 @@ async def test_ollama_option_routing_and_answer_ttft():
     assert chat["options"] == {"num_ctx": 8192, "temperature": 0.2}
     usage = chunks[-1].usage
     assert usage.answer_ttft_ms >= usage.ttft_ms
+
+
+async def test_ollama_tool_calls_roundtrip():
+    from jarvis.core.types import ToolCall
+
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            content=ndjson(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "files_list",
+                                    "arguments": {"path": "Documents"},
+                                }
+                            },
+                            {"function": {"name": "system_time", "arguments": "{}"}},
+                        ],
+                    },
+                    "done": False,
+                },
+                {"message": {"content": ""}, "done": True, "eval_count": 3},
+            ),
+        )
+
+    p = make_ollama(handler)
+    history = [
+        Message.user("hi"),
+        Message.assistant("", [ToolCall(name="notes_add", arguments={"text": "x"})]),
+        Message.tool("Saved note #1.", "notes_add", "abc"),
+    ]
+    tools = [{"type": "function", "function": {"name": "files_list", "parameters": {}}}]
+    chunks = [c async for c in p.stream_chat(history, "qwen3:8b", tools=tools)]
+    await p.aclose()
+
+    body = seen["body"]
+    assert body["tools"] == tools
+    assert body["messages"][1]["tool_calls"] == [
+        {"function": {"name": "notes_add", "arguments": {"text": "x"}}}
+    ]
+    assert body["messages"][2] == {
+        "role": "tool",
+        "content": "Saved note #1.",
+        "tool_name": "notes_add",
+    }
+    calls = chunks[0].tool_calls
+    assert [c.name for c in calls] == ["files_list", "system_time"]
+    assert calls[0].arguments == {"path": "Documents"} and calls[1].arguments == {}
+    assert chunks[-1].done

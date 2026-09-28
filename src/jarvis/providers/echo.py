@@ -27,6 +27,7 @@ class EchoProvider(ModelProvider):
         model: str,
         *,
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         start = time.perf_counter()
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")

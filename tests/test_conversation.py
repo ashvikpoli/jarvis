@@ -140,3 +140,16 @@ async def test_unknown_conversation():
     cm = make_manager()
     with pytest.raises(ConversationNotFound):
         await collect(cm.send(999, "hi"))
+
+
+def test_prompt_reserves_room_for_tools():
+    pb = PromptBuilder(
+        "sys",
+        context_tokens=100,
+        reserve_tokens=0,
+        include_datetime=False,
+        estimator=words_estimator,
+    )
+    history = [Message.user(f"m{i} " + "w " * 9) for i in range(10)]
+    assert len(pb.build(history).messages) - 1 == 4
+    assert len(pb.build(history, extra_tokens=28).messages) - 1 == 2

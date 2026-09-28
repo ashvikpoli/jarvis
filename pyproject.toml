@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local-first personal AI assistant"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -11,6 +11,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "rich>=13.7",
+    "psutil>=7.2.2",
+    "send2trash>=2.1.0",
 ]
 
 [project.scripts]
@@ -41,3 +43,6 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/jarvis/tools/notify.py" = ["E501"]  # embedded PowerShell script

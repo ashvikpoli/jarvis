@@ -266,3 +266,93 @@ id = "voice-short-confirm"
 category = "voice"
 prompt = "Say a short confirmation that you're ready, like a voice assistant would."
 checks = { max_words = 15, no_markdown = true }
+
+# ------------------------------------------------------------------ tools
+# Every case runs with tools available, in a sandbox: temp Documents/Desktop/
+# Downloads with sample files (report-q3.txt, budget-2026.csv, Taxes/receipt-2025.pdf,
+# Desktop/todo.txt …), a saved note (wifi password) and reminder #1 (dentist).
+
+[[case]]
+id = "tools-reminder-relative"
+category = "tools"
+prompt = "Remind me in 10 minutes to stretch."
+checks = { tools_called = ["reminders_set"], tool_args = { reminders_set = { text = "stretch" } } }
+
+[[case]]
+id = "tools-note-save"
+category = "tools"
+prompt = "Take a note: the plumber's number is 555-0142."
+checks = { tools_called = ["notes_add"], tool_args = { notes_add = { text = "555-0142" } } }
+
+[[case]]
+id = "tools-note-recall"
+category = "tools"
+prompt = "What's the guest wifi password? I saved it in a note."
+checks = { tools_called_any = ["notes_search"], contains_all = ["lemonade42"] }
+
+[[case]]
+id = "tools-list-documents"
+category = "tools"
+prompt = "What files are in my Documents folder?"
+checks = { tools_called_any = ["files_list", "files_search"], contains_any = ["report", "budget"] }
+
+[[case]]
+id = "tools-find-file"
+category = "tools"
+prompt = "Find my tax receipt."
+checks = { tools_called_any = ["files_search", "files_list"], contains_any = ["receipt"] }
+
+[[case]]
+id = "tools-read-file"
+category = "tools"
+prompt = "What's on my to-do list? It's todo.txt on my Desktop."
+checks = { tools_called = ["files_read"], contains_all = ["milk"] }
+
+[[case]]
+id = "tools-write-file"
+category = "tools"
+prompt = "Create a file called shopping.txt on my Desktop with milk and eggs on separate lines."
+checks = { tools_called = ["files_write"], tool_args = { files_write = { path = "shopping", content = "eggs" } } }
+
+[[case]]
+id = "tools-open-app"
+category = "tools"
+prompt = "Open Notepad."
+checks = { tools_called = ["apps_open"], tool_args = { apps_open = { name = "notepad" } } }
+
+[[case]]
+id = "tools-open-website"
+category = "tools"
+prompt = "Open youtube.com"
+checks = { tools_called = ["web_open"], tool_args = { web_open = { url = "youtube" } } }
+
+[[case]]
+id = "tools-system-ram"
+category = "tools"
+prompt = "How much RAM am I using right now?"
+checks = { tools_called = ["system_info"] }
+
+[[case]]
+id = "tools-none-math"
+category = "tools"
+prompt = "What's 12 times 12?"
+checks = { no_tools = true, number = 144 }
+
+[[case]]
+id = "tools-none-joke"
+category = "tools"
+prompt = "Tell me a one-line joke."
+checks = { no_tools = true, max_words = 40 }
+
+[[case]]
+id = "tools-reminder-correction"
+category = "tools"
+note = "The Tuesday/Thursday case from Phase 1, now with real reminder state."
+history = [
+  { role = "user", content = "Remind me Tuesday at 9am about the dentist." },
+  { role = "assistant", content = "", tool_calls = [ { name = "reminders_set", arguments = { text = "dentist appointment", at = "2026-09-29T09:00" } } ] },
+  { role = "tool", tool_name = "reminders_set", content = "Reminder #1 set for Tue 29 Sep 2026, 09:00: dentist appointment" },
+  { role = "assistant", content = "Done — I'll remind you Tuesday at 9am about the dentist." },
+]
+prompt = "Sorry, I meant Thursday, same time."
+checks = { tools_called = ["reminders_update"], tools_not_called = ["reminders_set"] }

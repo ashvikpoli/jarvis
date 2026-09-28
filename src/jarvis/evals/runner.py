@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 from rich.table import Table
 
-from jarvis.core.types import Message
+from jarvis.core.types import Message, ToolCall
 from jarvis.evals.cases import EvalCase, clean_reply, run_checks
+from jarvis.evals.sandbox import make_sandbox
 from jarvis.providers import ProviderError
 
 if TYPE_CHECKING:
@@ -35,6 +36,7 @@ class CaseResult:
     tokens_per_s: float | None = None
     total_ms: float | None = None
     error: str | None = None
+    tool_calls: list[str] = field(default_factory=list)  # "name {args}" for the report
 
 
 @dataclass
@@ -78,18 +80,28 @@ class EvalRunner:
         self.console = console or Console(quiet=True)
 
     async def run_case(self, case: EvalCase, options: dict[str, Any] | None) -> CaseResult:
+        """Run one case with tools available, inside a throwaway sandbox."""
         messages = [*case.history, Message.user(case.prompt)]
         parts: list[str] = []
+        calls: list[ToolCall] = []
         usage = None
+        box = make_sandbox()
         try:
-            async with aclosing(self.app.chat_stream(messages, EVAL_ROLE, options=options)) as s:
+            stream = self.app.agent_stream(
+                messages, box.ctx, box.approver, role=EVAL_ROLE, options=options
+            )
+            async with aclosing(stream) as s:
                 async for chunk in s:
                     parts.append(chunk.text)
+                    if chunk.event and chunk.event.kind == "call":
+                        calls.append(chunk.event.call)
                     usage = chunk.usage or usage
         except ProviderError as e:
             return CaseResult(case.id, case.category, False, ["error"], "", error=str(e))
+        finally:
+            box.close()
         reply = clean_reply("".join(parts))
-        failures = run_checks(reply, case.checks)
+        failures = run_checks(reply, case.checks, calls)
         return CaseResult(
             case.id,
             case.category,
@@ -99,6 +111,7 @@ class EvalRunner:
             answer_ttft_ms=usage.answer_ttft_ms if usage else None,
             tokens_per_s=usage.tokens_per_s if usage else None,
             total_ms=usage.total_ms if usage else None,
+            tool_calls=[f"{c.name} {json.dumps(c.arguments, default=str)}" for c in calls],
         )
 
     async def run_model(
@@ -180,9 +193,12 @@ def print_report(results: list[ModelResult], console: Console, *, verbose: bool 
         for c in failed if verbose else failed[:10]:
             reason = c.error or "; ".join(c.failures)
             console.print(f"  [red]✗[/] {c.case_id}: {reason}", highlight=False)
-            if verbose and c.reply:
-                snippet = " ".join(c.reply.split())[:200]
-                console.print(f"    [dim]{snippet}[/]", highlight=False)
+            if verbose:
+                for t in c.tool_calls:
+                    console.print(f"    [dim]⚙ {t[:160]}[/]", highlight=False)
+                if c.reply:
+                    snippet = " ".join(c.reply.split())[:200]
+                    console.print(f"    [dim]{snippet}[/]", highlight=False)
         if not verbose and len(failed) > 10:
             console.print(f"  [dim]... {len(failed) - 10} more (use -v)[/]")
 

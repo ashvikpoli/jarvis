@@ -73,10 +73,14 @@ class ModelManager:
         role: str = "chat",
         *,
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         provider, model = self.resolve(role)
         opts = self.options_for(role, options)
-        async for chunk in provider.stream_chat(messages, model, options=opts):
+        kw: dict[str, Any] = {"options": opts}
+        if tools:
+            kw["tools"] = tools
+        async for chunk in provider.stream_chat(messages, model, **kw):
             if chunk.done and chunk.usage:
                 u = chunk.usage
                 log.info(

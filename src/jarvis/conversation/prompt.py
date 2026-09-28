@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -46,7 +47,13 @@ class PromptBuilder:
         self.clock = clock
 
     def _cost(self, m: Message) -> int:
-        return self.estimator(m.content) + PER_MESSAGE_OVERHEAD
+        cost = self.estimator(m.content) + PER_MESSAGE_OVERHEAD
+        for call in m.tool_calls:
+            cost += self.estimator(call.name + json.dumps(call.arguments)) + PER_MESSAGE_OVERHEAD
+        return cost
+
+    def tokens_for_tools(self, specs: list[dict] | None) -> int:
+        return self.estimator(json.dumps(specs)) if specs else 0
 
     def system_message(self, dropped: int = 0) -> Message:
         parts = [self.system_prompt.strip()]
@@ -59,11 +66,12 @@ class PromptBuilder:
             )
         return Message.system("\n\n".join(parts))
 
-    def build(self, history: Sequence[Message]) -> BuiltPrompt:
+    def build(self, history: Sequence[Message], *, extra_tokens: int = 0) -> BuiltPrompt:
         """Fit history into the budget, newest first. The last message is always kept.
 
         A leading system message in `history` replaces the configured system prompt
-        (used by the stateless API when callers bring their own).
+        (used by the stateless API when callers bring their own). `extra_tokens` is
+        space taken by things outside the messages, e.g. tool definitions.
         """
         history = list(history)
         system_override = None
@@ -71,7 +79,7 @@ class PromptBuilder:
             system_override = history.pop(0)
 
         # Reserve a little for the "N messages omitted" note in case we need it.
-        budget = self.context_tokens - self.reserve_tokens - 30
+        budget = self.context_tokens - self.reserve_tokens - extra_tokens - 30
         system = system_override or self.system_message()
         budget -= self._cost(system)
 
@@ -83,6 +91,9 @@ class PromptBuilder:
             kept.append(m)
             budget -= cost
         kept.reverse()
+        # Never start with tool results whose tool call was trimmed away.
+        while len(kept) > 1 and kept[0].role == "tool":
+            kept.pop(0)
         dropped = len(history) - len(kept)
 
         if dropped and system_override is None:
@@ -91,5 +102,5 @@ class PromptBuilder:
         return BuiltPrompt(
             messages=messages,
             dropped=dropped,
-            est_tokens=sum(self._cost(m) for m in messages),
+            est_tokens=sum(self._cost(m) for m in messages) + extra_tokens,
         )

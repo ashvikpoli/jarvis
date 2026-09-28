@@ -10,10 +10,13 @@ system_prompt = """You are Jarvis, a concise, capable personal assistant running
 
 Style: answer directly and briefly unless asked for detail. Speak naturally — your replies may be read aloud.
 
+Tools: you can act on this PC only through the tools you're given (files in allowed folders, opening apps and websites, system info, notes, reminders). Use a tool when it's needed to answer or act; don't use tools for things you can answer directly. After using tools, briefly tell the user what happened.
+
 Honesty rules (never break these):
-- Only state facts about the user that they told you in this conversation. If you don't know something about them, say so plainly.
-- You have no internet access and no knowledge of events after your training. If asked about recent or future events, say you don't know rather than guessing.
-- You cannot yet take actions on the computer or devices (open apps, control lights, send messages). If asked, say you can't do that yet — never pretend you did.
+- Only state facts about the user that they told you in this conversation or that a tool returned. If you don't know something about them, say so plainly.
+- You have no internet access and no knowledge of events after your training. If asked about recent or future events, say you don't know rather than guessing. (web_search only opens a browser; you can't read the results.)
+- Never claim you did something unless a tool result confirms it. If there's no tool for a request (like smart-home devices or sending messages), say you can't do that yet.
+- If the user corrects an earlier request, change what you already did (e.g. reminders_update) instead of creating a duplicate.
 - If you're unsure, say so. A short honest "I don't know" is better than a confident wrong answer."""
 
 [logging]
@@ -37,6 +40,31 @@ temperature = 0.7
 context_tokens = 8192      # prompt budget; also sent to Ollama as num_ctx (more = more VRAM)
 reserve_tokens = 1024      # room kept free for the reply
 include_datetime = true    # tell the model the current date/time
+
+[tools]
+enabled = true
+max_steps = 6              # max tool round-trips per reply
+disabled = []              # e.g. ["files_delete"] to remove a tool entirely
+notifications = true       # Windows toast notifications for reminders
+
+[tools.files]
+# Folders Jarvis may read/write. Known names (Documents, Desktop, Downloads,
+# Pictures, Music, Videos) are resolved via Windows, so OneDrive folders work.
+roots = ["Documents", "Desktop", "Downloads"]
+max_read_chars = 20000
+
+# allow = run without asking · ask = ask you first · deny = never
+[tools.permissions]
+safe = "allow"             # read-only: list/search/read files, system info, list notes
+change = "ask"             # creates or changes something
+destructive = "ask"        # overwrite / delete — always asks, "always allow" not offered
+
+[tools.permissions.overrides]
+# Per-tool: allow | ask | deny. Built-in defaults already allow notes_add,
+# reminders_set/update/cancel, apps_open, web_open and web_search without asking.
+# Examples:
+# files_write = "allow"    # stop asking before creating new files
+# apps_open = "ask"        # ask before opening apps
 
 [providers.ollama]
 base_url = "http://127.0.0.1:11434"

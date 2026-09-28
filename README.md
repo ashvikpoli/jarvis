@@ -2,10 +2,11 @@
 
 A local-first personal AI assistant for Windows, built layer by layer.
 
-**Current phase: 1 — Conversation.** Streaming, interruptible chat with a local model;
-conversations saved in SQLite and resumable; context-window management; an eval
-harness for choosing models. Specs: [`docs/phase-0.md`](docs/phase-0.md),
-[`docs/phase-1.md`](docs/phase-1.md).
+**Current phase: 2 — Tools.** Jarvis can work with your files, open apps and
+websites, check your PC's status, and keep notes and reminders — every action goes
+through a permission check and is recorded in an audit log. Built on Phase 1's
+saved, resumable conversations and eval harness.
+Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md).
 
 ## Setup (Windows, native — not WSL)
 
@@ -42,13 +43,17 @@ uv run jarvis history                       # list conversations
 uv run jarvis history 3                     # print conversation #3
 uv run jarvis eval                          # score the chat model on evals/cases.toml
 uv run jarvis eval --models ollama:qwen3:14b,ollama:qwen3:8b   # compare models
+uv run jarvis tools                         # what Jarvis can do + what needs your OK
+uv run jarvis audit                         # every tool call Jarvis has made
+uv run jarvis reminders                     # upcoming reminders
+uv run jarvis notify                        # test Windows notifications
 uv run jarvis serve                         # HTTP API on http://127.0.0.1:8765/docs
 uv run jarvis doctor                        # diagnose setup, VRAM fit, latency
 uv run pytest                               # tests
 ```
 
 In chat: `/new`, `/list`, `/resume ID`, `/title TEXT`, `/think on|off`,
-`/model REF`, `/help`, `/exit`. **Ctrl+C while Jarvis is answering interrupts
+`/tools`, `/reminders`, `/model REF`, `/help`, `/exit`. **Ctrl+C while Jarvis is answering interrupts
 it** (the partial answer is saved); Ctrl+C at the prompt quits.
 
 After every reply you'll see `answer in X ms · Y tok/s` — "answer in" is the time
@@ -60,6 +65,25 @@ Stream from the API:
 curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
   -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'
 ```
+
+## What Jarvis can do (Phase 2)
+
+Try: *"what's in my Downloads folder?"*, *"find my tax receipt"*, *"create
+shopping.txt on my Desktop with milk and eggs"*, *"open Spotify"*, *"open
+youtube.com"*, *"how much RAM am I using?"*, *"note that the plumber's number is
+555-0142"*, *"remind me in 10 minutes to stretch"* → *"actually make it 20"*.
+
+| Permission | Tools |
+|---|---|
+| runs automatically | list/search/read files, system info, time, list apps, notes, reminders, open apps & websites |
+| asks you first | create files/folders, move/rename, delete (→ Recycle Bin), overwrite |
+
+- File access is limited to **Documents, Desktop, Downloads** (OneDrive-aware). Change
+  in `[tools.files] roots`.
+- At an approval prompt: `y` = once, `n` = no, `a` = always for this session (not
+  offered for delete/overwrite).
+- Reminders pop up as Windows notifications **while Jarvis is running** (`chat` or
+  `serve`). A background service comes in Phase 6.
 
 ## Configuration
 
@@ -74,6 +98,13 @@ think = true    # let the model reason first (slower, sometimes smarter)
 
 [conversation]
 context_tokens = 16384   # longer memory within a chat; costs more VRAM
+
+[tools.permissions.overrides]
+files_write = "allow"    # stop asking before creating new files
+files_delete = "deny"    # never delete
+
+[tools.files]
+roots = ["Documents", "Desktop", "Downloads", "D:\\Projects"]
 ```
 
 Env vars override everything: `$env:JARVIS_MODELS__ROLES__CHAT = "ollama:qwen3:8b"`.
@@ -90,6 +121,8 @@ src/jarvis/
   providers/          model backends + ModelManager (roles → models, per-role options)
   storage/            SQLite database + conversation store
   conversation/       ConversationManager, PromptBuilder (context window)
+  agent/              AgentLoop: model ⇄ tools, permissions, audit
+  tools/              tool framework + files, system/apps, notes/reminders
   evals/              eval checks + runner
   interfaces/         cli.py, api.py
 evals/cases.toml      eval cases — add one whenever Jarvis gets something wrong
@@ -97,6 +130,6 @@ evals/cases.toml      eval cases — add one whenever Jarvis gets something wron
 
 ## Roadmap
 
-0 Foundation · 1 Conversation + evals · 2 Tools (MCP) + permissions · 3 Memory ·
+0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions (testing) · 3 Memory ·
 4 Voice MVP · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
 8 Polish + packaging
