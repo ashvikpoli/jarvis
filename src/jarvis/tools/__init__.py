@@ -15,8 +15,9 @@ from jarvis.tools.registry import (
     ToolRegistry,
 )
 from jarvis.tools.system import SYSTEM_TOOLS, SystemLauncher
+from jarvis.tools.vault import VAULT_TOOLS
 
-ALL_TOOLS = [*FILE_TOOLS, *SYSTEM_TOOLS, *NOTE_TOOLS, *MEMORY_TOOLS, *CALC_TOOLS]
+ALL_TOOLS = [*FILE_TOOLS, *SYSTEM_TOOLS, *NOTE_TOOLS, *MEMORY_TOOLS, *CALC_TOOLS, *VAULT_TOOLS]
 
 
 def default_registry() -> ToolRegistry:

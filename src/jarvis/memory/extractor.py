@@ -38,6 +38,8 @@ Do NOT remember:
 
 Write each memory as one short standalone sentence starting with "User" (e.g. "User's sister is named Priya.").
 
+Give each memory a "subject": the person, project or topic it is about, as a short proper name ("Priya", "Exinent sale", "Dividend investing"). Reuse a name from KNOWN SUBJECTS when it's the same one. Use null when the fact is about the user themselves (their name, home, job, likes).
+
 Compare with EXISTING memories (listed with ids):
 - if the message changes or corrects one (moved city, new job), use "update" with that id and the full new sentence
 - if the user asks to forget something or says it's no longer true, use "delete" with that id
@@ -58,6 +60,7 @@ EXTRACT_SCHEMA = {
                     "id": {"type": ["integer", "null"]},
                     "text": {"type": "string"},
                     "category": {"type": "string", "enum": list(CATEGORIES)},
+                    "subject": {"type": ["string", "null"]},
                 },
                 "required": ["op"],
             },
@@ -105,13 +108,21 @@ class MemoryExtractor:
         known = {s.memory.id: s.memory for s in related}
         for m in self.service.core():
             known.setdefault(m.id, m)
-        existing = "\n".join(f"#{i}: {m.text}" for i, m in known.items()) or "(none)"
+        existing = (
+            "\n".join(
+                f"#{i}: {m.text}" + (f"  [subject: {m.subject}]" if m.subject else "")
+                for i, m in known.items()
+            )
+            or "(none)"
+        )
+        subjects = ", ".join(self.service.store.subjects()[:40]) or "(none yet)"
         recent = "\n".join(
             f"{m.role.capitalize()}: {m.content[:400]}"
             for m in list(context)[-2:]
             if m.role in ("user", "assistant") and m.content
         )
         prompt = (
+            f"KNOWN SUBJECTS: {subjects}\n\n"
             f"EXISTING memories:\n{existing}\n\n"
             + (f"Recent conversation (context only):\n{recent}\n\n" if recent else "")
             + f"USER's latest message:\n{user_text}"
@@ -122,17 +133,28 @@ class MemoryExtractor:
         for op in ops:
             kind, text, mid = op.get("op"), (op.get("text") or "").strip(), op.get("id")
             category = op.get("category") or "other"
+            subject = op.get("subject") if isinstance(op.get("subject"), str) else None
+            if subject and subject.islower():
+                subject = subject[:1].upper() + subject[1:]  # "rahul" → "Rahul"
+            if category in ("profile", "preference"):
+                subject = None  # facts about the user themselves
             if kind == "add" and text:
                 if _SECRETISH.search(text):
                     continue
                 mem, created = await self.service.save(
-                    text, category=category, source="learned", conversation_id=conversation_id
+                    text,
+                    category=category,
+                    source="learned",
+                    conversation_id=conversation_id,
+                    subject=subject,
                 )
                 changes.append(Change("add" if created else "duplicate", mem.id, mem.text))
             elif kind == "update" and text and mid in known:  # only ids we showed it
                 if _SECRETISH.search(text):
                     continue
-                mem = await self.service.update(mid, text, category)
+                mem = await self.service.update(
+                    mid, text, category, subject if subject else known[mid].subject
+                )
                 if mem:
                     changes.append(Change("update", mem.id, mem.text))
             elif kind == "delete" and mid in known:
@@ -146,6 +168,64 @@ class MemoryExtractor:
         async for chunk in self.models.stream_chat(messages, self.role, options=opts):
             parts.append(chunk.text)
         return "".join(parts)
+
+
+SUBJECTS_SYSTEM = """You sort a personal assistant's memories about the user into pages.
+For each memory, give its subject: the person, project or topic it is about, as a short proper name ("Priya", "Exinent sale", "Dividend investing"). Use the same name for memories about the same thing. Use null when it's about the user themselves (their name, home, job, likes).
+Return JSON only: {"subjects": [{"id": 1, "subject": "Priya"}, ...]}"""
+
+SUBJECTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subjects": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "subject": {"type": ["string", "null"]},
+                },
+                "required": ["id"],
+            },
+        }
+    },
+    "required": ["subjects"],
+}
+
+
+async def assign_subjects(
+    models: ModelManager, store, role: str = "memory", batch: int = 25
+) -> int:
+    """Give older memories (from before Phase 4.5) a subject, so they get their own page."""
+    todo = [
+        m
+        for m in store.list(limit=100_000)
+        if m.subject is None and m.category in ("person", "project", "other")
+    ]
+    done = 0
+    for i in range(0, len(todo), batch):
+        part = todo[i : i + batch]
+        known = ", ".join(store.subjects()[:40]) or "(none yet)"
+        listing = "\n".join(f"#{m.id} [{m.category}] {m.text}" for m in part)
+        msgs = [
+            Message.system(SUBJECTS_SYSTEM),
+            Message.user(f"KNOWN SUBJECTS: {known}\n\nMEMORIES:\n{listing}"),
+        ]
+        parts: list[str] = []
+        opts = {"format": SUBJECTS_SCHEMA, "temperature": 0, "think": False}
+        async for chunk in models.stream_chat(msgs, role, options=opts):
+            parts.append(chunk.text)
+        raw = "".join(parts)
+        try:
+            data = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        ids = {m.id for m in part}
+        for item in data.get("subjects", []) if isinstance(data, dict) else []:
+            if isinstance(item, dict) and item.get("id") in ids and item.get("subject"):
+                store.update(item["id"], subject=str(item["subject"]))
+                done += 1
+    return done
 
 
 def _parse_ops(raw: str) -> list[dict]:

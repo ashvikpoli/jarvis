@@ -91,6 +91,35 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_memories_category ON memories(category);
     """,
+    # 4 — Obsidian vault: what each memory is about, secret notes, sync bookkeeping
+    """
+    ALTER TABLE memories ADD COLUMN subject TEXT;  -- person/project/topic; NULL = the user
+    ALTER TABLE notes ADD COLUMN secret INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE notes ADD COLUMN updated_at TEXT;
+
+    -- One row per file Jarvis writes in the vault: what it wrote (to spot your edits)
+    CREATE TABLE vault_files (
+        key         TEXT PRIMARY KEY,     -- e.g. page:People/Priya, note:5, conv:12, reminders
+        path        TEXT NOT NULL,        -- relative to the vault
+        hash        TEXT NOT NULL,        -- sha1 of the content Jarvis last wrote/read
+        ids         TEXT NOT NULL DEFAULT '[]',  -- JSON: memory/reminder ids on the page
+        version     TEXT,                 -- source version (e.g. conversation updated_at)
+        written_at  TEXT NOT NULL
+    );
+    CREATE INDEX idx_vault_files_path ON vault_files(path);
+
+    -- Your notes, chunked + embedded for vault_search
+    CREATE TABLE vault_chunks (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        path         TEXT NOT NULL,
+        heading      TEXT NOT NULL DEFAULT '',
+        text         TEXT NOT NULL,
+        mtime        REAL NOT NULL,
+        embedding    BLOB,
+        embed_model  TEXT
+    );
+    CREATE INDEX idx_vault_chunks_path ON vault_chunks(path);
+    """,
 ]
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from datetime import UTC, datetime, timedelta
 
@@ -30,8 +31,22 @@ def _fmt_local(dt_utc: datetime) -> str:
 # ------------------------------------------------------------------ notes
 
 
+_SECRET = re.compile(r"\b(passwords?|passcodes?|passwd|pins?|otp|cvv|ssn|api[ -]?keys?)\b", re.I)
+_CODEISH = re.compile(r"\b(code|combination|secret|key)\b", re.I)
+
+
+def looks_secret(text: str) -> bool:
+    """Codes/passwords stay in Jarvis's database only — never written to the vault."""
+    return bool(_SECRET.search(text)) or (
+        bool(_CODEISH.search(text)) and bool(re.search(r"\d{3,}", text))
+    )
+
+
 class NoteAddArgs(BaseModel):
     text: str = Field(description="The note, in the user's words.")
+    secret: bool = Field(
+        False, description="True for passwords, PINs, door/alarm codes and similar."
+    )
 
 
 class NotesAdd(Tool):
@@ -48,9 +63,10 @@ class NotesAdd(Tool):
 
     async def run(self, args: NoteAddArgs, ctx: ToolContext):
         with ctx.db.lock, ctx.db.conn:
+            now = _iso(_utcnow())
             cur = ctx.db.conn.execute(
-                "INSERT INTO notes (text, created_at) VALUES (?, ?)",
-                (args.text, _iso(_utcnow())),
+                "INSERT INTO notes (text, created_at, updated_at, secret) VALUES (?, ?, ?, ?)",
+                (args.text, now, now, int(args.secret or looks_secret(args.text))),
             )
         return f"Saved note #{cur.lastrowid}."
 

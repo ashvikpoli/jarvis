@@ -2,11 +2,14 @@
 
 A local-first personal AI assistant for Windows, built layer by layer.
 
-**Current phase: 4 — Voice.** Tap **Right Ctrl**, speak, and Jarvis answers out
-loud in a British voice — everything local (faster-whisper on the GPU, Kokoro TTS).
+**Current phase: 4.5 — Obsidian second brain.** Everything Jarvis knows (memory,
+notes, reminders, conversations, a daily journal) lives as Markdown pages in your
+Obsidian vault — edit them and Jarvis learns from your edits; it also searches the
+notes you write. Phase 4: tap **Right Ctrl**, speak, and Jarvis answers out loud in a
+British voice — everything local (faster-whisper on the GPU, Kokoro TTS).
 Built on Phase 3's long-term memory, Phase 2's tools (files, apps, notes, reminders —
 every action permission-checked and audited) and Phase 1's saved conversations and evals.
-Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md) · [phase 4](docs/phase-4.md).
+Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md) · [phase 4](docs/phase-4.md) · [phase 4.5](docs/phase-4.5.md).
 Full test checklist: [docs/testing.md](docs/testing.md).
 
 ## Setup (Windows, native — not WSL)
@@ -49,6 +52,7 @@ uv run jarvis voice setup | test            # download voice models | self-test 
 uv run jarvis voice say "Hello sir"         # hear a sentence (--save hello.wav)
 uv run jarvis voice voices --play           # hear the voices
 uv run jarvis voice devices                 # microphones & speakers
+uv run jarvis vault                         # Obsidian vault status (sync | search TEXT | rebuild | open)
 uv run jarvis history                       # list conversations
 uv run jarvis history 3                     # print conversation #3
 uv run jarvis eval                          # score the chat model on evals/cases.toml
@@ -80,6 +84,23 @@ Stream from the API:
 curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
   -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'
 ```
+
+## Obsidian second brain (Phase 4.5)
+
+Your vault (`Documents\obsidian_notes`) stays in sync while Jarvis runs:
+**Home**, **About me**, a page per person / project / topic, **Notes**, **Reminders**
+(a checklist), a **Journal** page per day and every **conversation**. Start with
+`uv run jarvis vault sync`, then open the vault in Obsidian.
+
+- Jarvis's part of a page sits between `%% jarvis:start %%` and `%% jarvis:end %%`.
+  Edit, add or delete lines there and Jarvis updates its memory (delete a *line* to
+  make it forget — deleting a whole page keeps the facts). Tick a reminder to finish
+  it, or add `- [ ] Pay rent 📅 2026-11-01 9am`.
+- Everything outside the markers is yours: Jarvis never rewrites it — and searches
+  it (*"what did I write about pricing?"*).
+- Drop files into **Inbox/** — Jarvis learns from them and files them in Notes.
+- Passwords and codes never leave Jarvis (🔒 in the vault).
+- Details and safety rules: [docs/phase-4.5.md](docs/phase-4.5.md).
 
 ## Voice (Phase 4)
 
@@ -193,6 +214,7 @@ src/jarvis/
   agent/              AgentLoop: model ⇄ tools, permissions, audit
   memory/             long-term memory: store, embeddings, recall, background learning
   voice/              mic + VAD, Whisper STT, Kokoro TTS, hotkey, VoiceSession
+  vault/              Obsidian pages ⇄ database (two-way sync), vault search index
   tools/              tool framework + files, system/apps, notes/reminders, memory
   evals/              eval checks + runner
   interfaces/         cli.py, api.py
@@ -202,5 +224,5 @@ evals/cases.toml      eval cases — add one whenever Jarvis gets something wron
 ## Roadmap
 
 0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions ✅ · 3 Memory (testing) ·
-4 Voice MVP (testing) · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
+4 Voice MVP (testing) · 4.5 Obsidian second brain (testing) · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
 8 Polish + packaging

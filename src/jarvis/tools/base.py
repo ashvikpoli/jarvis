@@ -70,6 +70,7 @@ class ToolContext:
     apps: Any = None  # AppCatalog; None = the shared real one
     files: FilePolicy = field(default_factory=FilePolicy)
     memory: Any = None  # MemoryService; None = memory off
+    vault: Any = None  # VaultIndex; None = no Obsidian vault
     clock: Any = field(default=lambda: datetime.now().astimezone())
 
 

@@ -105,25 +105,49 @@ class MemoryService:
         category: str = "other",
         source: str = "told",
         conversation_id: int | None = None,
+        subject: str | None = None,
+        same_subject_only: bool = False,
     ) -> tuple[Memory, bool]:
-        """Save a memory, or update the near-identical one. Returns (memory, created)."""
+        """Save a memory, or update the near-identical one. Returns (memory, created).
+
+        A near-duplicate about a *different* person/project is never overwritten
+        ("Mom is a doctor in Pune" must not replace "Priya is a doctor in Pune").
+        `same_subject_only`: only treat memories with exactly this subject as duplicates.
+        """
         text = " ".join(text.split())
         vecs = await self.embedder.docs([text])
         vec = vecs[0] if vecs else None
         model = self.embedder.model_ref if vec else None
-        dupes = self.store.search(
-            text,
-            query_vector=vec,
-            embed_model=model,
-            limit=1,
-            min_score=self.dedupe_threshold,
-            min_keyword=1.01,  # vectors only
-        )
-        exact = [m for m in self.store.list() if m.text.lower() == text.lower()]
-        existing = exact[0] if exact else (dupes[0].memory if dupes else None)
+        want = self.store.canonical_subject(subject)
+
+        def compatible(m) -> bool:
+            if same_subject_only:
+                return (m.subject or "").lower() == (want or "").lower()
+            return not (m.subject and want) or m.subject.lower() == want.lower()
+
+        dupes = [
+            d.memory
+            for d in self.store.search(
+                text,
+                query_vector=vec,
+                embed_model=model,
+                limit=5,
+                min_score=self.dedupe_threshold,
+                min_keyword=1.01,  # vectors only
+            )
+            if compatible(d.memory)
+        ]
+        exact = [m for m in self.store.list() if m.text.lower() == text.lower() and compatible(m)]
+        existing = exact[0] if exact else (dupes[0] if dupes else None)
         if existing is not None:
+            keep = existing.subject if subject is None else subject
             updated = self.store.update(
-                existing.id, text=text, category=category, embedding=vec, embed_model=model
+                existing.id,
+                text=text,
+                category=category,
+                embedding=vec,
+                embed_model=model,
+                subject=keep,
             )
             return updated or existing, False
         mem = self.store.add(
@@ -133,10 +157,18 @@ class MemoryService:
             conversation_id=conversation_id,
             embedding=vec,
             embed_model=model,
+            subject=subject,
         )
         return mem, True
 
-    async def update(self, memory_id: int, text: str, category: str | None = None) -> Memory | None:
+    async def update(
+        self,
+        memory_id: int,
+        text: str,
+        category: str | None = None,
+        subject: str | None | object = ...,
+    ) -> Memory | None:
+        """`subject=...` keeps the current one."""
         vecs = await self.embedder.docs([text])
         return self.store.update(
             memory_id,
@@ -144,6 +176,7 @@ class MemoryService:
             category=category,
             embedding=vecs[0] if vecs else None,
             embed_model=self.embedder.model_ref if vecs else None,
+            subject=subject,
         )
 
     def forget(self, memory_id: int) -> bool:

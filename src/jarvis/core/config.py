@@ -169,6 +169,22 @@ class VoiceSettings(BaseModel):
     )
 
 
+class VaultSettings(BaseModel):
+    """Obsidian vault: Jarvis's memory, notes, reminders and chats as Markdown pages."""
+
+    enabled: bool = True
+    # A folder name Windows knows ("Documents/…", OneDrive-aware) or a full path.
+    path: str = "Documents/obsidian_notes"
+    poll_s: float = 3.0  # how often to sync
+    quiet_s: float = 4.0  # leave a file alone for this long after you edit it
+    conversations: bool = True  # a page per conversation
+    journal: bool = True  # a page per day
+    inbox: bool = True  # learn from files dropped in Inbox/
+    search: bool = True  # index your notes for vault_search
+    search_conversations: bool = False  # also search chat transcripts
+    user_name: str = "You"  # how you're labelled in transcripts
+
+
 class OllamaSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
     keep_alive: str = "30m"
@@ -236,6 +252,7 @@ class Settings(BaseSettings):
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    vault: VaultSettings = Field(default_factory=VaultSettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 

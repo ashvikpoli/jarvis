@@ -45,6 +45,8 @@ def make_app(tmp_path, roots):
     def factory(turns=(), config: str = "") -> tuple[JarvisApp, ScriptedProvider]:
         cfg = tmp_path / f"cfg{len(apps)}"
         cfg.mkdir()
+        if "[vault]" not in config:  # never touch a real vault from tests
+            config += "\n[vault]\nenabled = false\n"
         (cfg / "default.toml").write_text(
             '[models]\nroles = { chat = "scripted:main" }\n' + config, encoding="utf-8"
         )

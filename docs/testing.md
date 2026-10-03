@@ -115,6 +115,26 @@ Once: `uv run jarvis voice setup` (downloads ~1.9 GB the first time).
 | V15 | Tap, then say nothing | Low beep, "(didn't hear anything)", no reply. |
 | V16 | In a 2nd window while voice mode runs: `uv run jarvis doctor` | Chat model still 100 % on GPU. |
 
+## Part O — Obsidian vault (Phase 4.5, ≈10 min)
+
+Open `Documents\obsidian_notes` in Obsidian. Keep `uv run jarvis chat` running in a
+window (the vault syncs every 3 s while Jarvis runs).
+
+| # | Do | Expected |
+|---|---|---|
+| O1 | `uv run jarvis vault sync` | Pages written; Home, About me, People/…, Projects/…, Reminders, Journal, Conversations appear. Your memories are sorted into person/project/topic pages. |
+| O2 | Open **Home** | Links to today, reminders, people, projects, recent conversations all work. |
+| O3 | In a person's page, change a fact (e.g. a city) and wait 10 s | Chat shows ✏️ Updated; `/memory` shows the new text. |
+| O4 | In **About me** → Preferences, add `- User likes filter coffee` | 💾 Remembered; in a `/new` chat "what coffee do I like?" → filter coffee. The line gets a `^m…` tag. |
+| O5 | Delete one fact line from a page | 🗑 Forgot after ~10 s; `/memory` agrees. |
+| O6 | Write under **## My notes** of a person page | Kept as you wrote it after the next sync. |
+| O7 | In chat: "my friend Rahul moved to Austin" | A new `People/Rahul.md` appears. |
+| O8 | In **Reminders**, tick a box; add `- [ ] Test reminder 📅 <today> <in 2 minutes, e.g. 18:45>` | Ticked one is done (`/reminders`); the new one fires (toast) at that time. |
+| O9 | Create `Ideas/Pricing.md` with a few lines, then ask "what did I write about pricing?" | Jarvis uses vault_search and answers from your note. |
+| O10 | Drop a `.md` with some facts about you into **Inbox/** | "📓 Filed from Inbox", 💾 Remembered lines; file moved to Notes/. |
+| O11 | "Note that the garage code is 4417" | Notes shows 🔒 Secret note — the code is not in any file. "What's the garage code?" still works. |
+| O12 | Rename a person page (e.g. Priya → Priya Rao) | The memories now say subject Priya Rao (`jarvis memory`), nothing forgotten. |
+
 ## Part C — Records & API (≈3 min)
 
 | # | Command | Expected |

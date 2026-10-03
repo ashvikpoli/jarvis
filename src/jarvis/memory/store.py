@@ -31,6 +31,7 @@ class Memory(BaseModel):
     last_used_at: str | None = None
     use_count: int = 0
     embed_model: str | None = None
+    subject: str | None = None  # who/what it's about (a person, project, topic); None = the user
 
 
 class ScoredMemory(BaseModel):
@@ -54,14 +55,15 @@ class MemoryStore:
         conversation_id: int | None = None,
         embedding: Sequence[float] | None = None,
         embed_model: str | None = None,
+        subject: str | None = None,
     ) -> Memory:
         now = _now()
         category = category if category in CATEGORIES else "other"
         with self.db.lock, self.db.conn:
             cur = self.db.conn.execute(
                 """INSERT INTO memories (text, category, source, conversation_id, created_at,
-                       updated_at, embedding, embed_model)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       updated_at, embedding, embed_model, subject)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     text.strip(),
                     category,
@@ -71,6 +73,7 @@ class MemoryStore:
                     now,
                     pack(embedding) if embedding else None,
                     embed_model,
+                    self.canonical_subject(subject),
                 ),
             )
         return self.get(cur.lastrowid)  # type: ignore[return-value]
@@ -83,7 +86,9 @@ class MemoryStore:
         category: str | None = None,
         embedding: Sequence[float] | None = None,
         embed_model: str | None = None,
+        subject: str | None | object = ...,
     ) -> Memory | None:
+        """`subject=...` (the default) keeps it; None makes it about the user."""
         current = self.get(memory_id)
         if current is None:
             return None
@@ -91,6 +96,9 @@ class MemoryStore:
         new_text = (text or current.text).strip()
         sets = ["text = ?", "category = ?", "updated_at = ?"]
         params: list = [new_text, new_cat, _now()]
+        if subject is not ...:
+            sets.append("subject = ?")
+            params.append(self.canonical_subject(subject))  # type: ignore[arg-type]
         if embedding is not None:
             sets += ["embedding = ?", "embed_model = ?"]
             params += [pack(embedding), embed_model]
@@ -128,6 +136,30 @@ class MemoryStore:
         with self.db.lock:
             rows = self.db.conn.execute(sql, (*params, limit)).fetchall()
         return [_row(r) for r in rows]
+
+    def subjects(self) -> list[str]:
+        """Everyone/everything memories are about, most-mentioned first."""
+        with self.db.lock:
+            rows = self.db.conn.execute(
+                "SELECT subject, COUNT(*) n FROM memories WHERE subject IS NOT NULL "
+                "GROUP BY subject ORDER BY n DESC, subject"
+            ).fetchall()
+        return [r["subject"] for r in rows]
+
+    def canonical_subject(self, subject: str | None) -> str | None:
+        """Tidy a subject name and reuse an existing spelling ("priya" → "Priya").
+
+        A new name keeps the spelling it was given — it's also a page's file name.
+        """
+        if not subject:
+            return None
+        name = " ".join(str(subject).replace("[[", "").replace("]]", "").split()).strip(" .")
+        if not name or name.lower() in ("user", "the user", "me", "myself", "none", "null"):
+            return None
+        for existing in self.subjects():
+            if existing.lower() == name.lower():
+                return existing
+        return name
 
     def count(self) -> int:
         with self.db.lock:

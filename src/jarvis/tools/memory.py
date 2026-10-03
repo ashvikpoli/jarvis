@@ -19,6 +19,11 @@ def _service(ctx: ToolContext):
 class SaveArgs(BaseModel):
     text: str = Field(description='One standalone sentence, e.g. "User\'s sister is Priya."')
     category: str = Field("other", description=f"One of: {_CATS}.")
+    subject: str | None = Field(
+        None,
+        description='Who/what it\'s about as a short name ("Priya", "Exinent sale"); '
+        "omit for facts about the user themselves.",
+    )
 
 
 class MemorySave(Tool):
@@ -36,7 +41,11 @@ class MemorySave(Tool):
 
     async def run(self, args: SaveArgs, ctx: ToolContext):
         mem, created = await _service(ctx).save(
-            args.text, category=args.category, source="told", conversation_id=ctx.conversation_id
+            args.text,
+            category=args.category,
+            source="told",
+            conversation_id=ctx.conversation_id,
+            subject=None if args.category in ("profile", "preference") else args.subject,
         )
         verb = "Remembered" if created else "Already knew this; updated"
         return f"{verb} memory #{mem.id}: {mem.text}"

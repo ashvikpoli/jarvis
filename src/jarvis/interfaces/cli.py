@@ -220,6 +220,8 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
         )
         app.scheduler.start()
         app.apps.prefetch()  # so the first "open X" doesn't wait for the app scan
+        if app.start_vault():
+            app.vault_listeners.append(_print_vault_report)
         try:
             runner.run(app.memory.backfill())  # also loads the embedding model
         except ProviderError:
@@ -448,6 +450,107 @@ def cmd_memory(settings: Settings, args: argparse.Namespace) -> int:
     finally:
         asyncio.run(app.aclose())
     return code
+
+
+# ---------------------------------------------------------------- vault
+
+
+def _print_vault_report(report) -> None:
+    for line in report.imported:
+        console.print(f"\n[blue]📓 Obsidian: {line}[/]", highlight=False)
+    for line in report.filed:
+        console.print(f"\n[blue]📓 Filed from Inbox: {line}[/]", highlight=False)
+
+
+def cmd_vault(settings: Settings, args: argparse.Namespace) -> int:
+    from jarvis.app import resolve_vault
+
+    action = args.action or "status"
+    root = resolve_vault(settings.vault.path)
+    if not settings.vault.enabled:
+        console.print("[yellow]The vault is turned off ([vault] enabled = false).[/]")
+        return 1
+    if not root.is_dir():
+        console.print(
+            f"[red]✗ No vault at {root}[/]\nCreate it in Obsidian (Open folder as vault), or "
+            'set [vault] path = "…" in config/local.toml.'
+        )
+        return 1
+    if action == "open":
+        import urllib.parse
+
+        uri = "obsidian://open?path=" + urllib.parse.quote(str(root / "Home.md"))
+        app = JarvisApp.create(settings)
+        try:
+            app.launcher.open(uri)
+            console.print(f"[dim]Opening {root} in Obsidian…[/]")
+        finally:
+            asyncio.run(app.aclose())
+        return 0
+
+    app = JarvisApp.create(settings)
+
+    async def run():
+        sync = app.make_vault_sync()
+        try:
+            if action == "rebuild":
+                with console.status("Sorting memories into people / projects / topics…"):
+                    with app.db.lock, app.db.conn:
+                        app.db.conn.execute("DELETE FROM vault_files WHERE key LIKE 'meta:%'")
+                    n = await app.prepare_vault(sync)
+                console.print(f"[dim]Gave {n} memories a page.[/]")
+            if action in ("sync", "rebuild"):
+                with console.status("Syncing the vault…"):
+                    report = await sync.cycle()
+                _print_memory_changes(report.changes)
+                _print_vault_report(report)
+                console.print(
+                    f"[green]✓[/] {len(report.written)} pages written, "
+                    f"{len(report.deleted)} removed, {report.indexed} chunks indexed"
+                    + (
+                        f", {len(report.skipped_busy)} left alone (being edited)"
+                        if report.skipped_busy
+                        else ""
+                    )
+                )
+                return 0
+            if action == "search":
+                if app.vault_index is None:
+                    console.print("[yellow]Search is off ([vault] search = false).[/]")
+                    return 1
+                hits = await app.vault_index.search(" ".join(args.rest), limit=8)
+                for h in hits:
+                    where = h["page"] + (f" › {h['section']}" if h["section"] else "")
+                    console.print(f"  [bold]{where}[/] [dim]{h['score']}[/]", highlight=False)
+                    console.print(f"    {_first_line(h['text'], 140)}", highlight=False)
+                if not hits:
+                    console.print("[dim]Nothing found.[/]")
+                return 0
+            # status
+            with app.db.lock:
+                kinds = app.db.conn.execute(
+                    "SELECT substr(key, 1, instr(key, ':') - 1) AS k, COUNT(*) AS n "
+                    "FROM vault_files WHERE hash != 'deleted' AND key NOT LIKE 'meta:%' "
+                    "GROUP BY k"
+                ).fetchall()
+                last = app.db.conn.execute("SELECT MAX(written_at) FROM vault_files").fetchone()[0]
+            counts = {r["k"]: r["n"] for r in kinds}
+            console.print(f"[bold]Vault[/] {root}")
+            console.print(
+                f"  pages: {counts.get('page', 0)} · notes: {counts.get('note', 0)} · "
+                f"conversations: {counts.get('conv', 0)} · days: {counts.get('day', 0)}"
+            )
+            if app.vault_index is not None:
+                console.print(f"  search index: {app.vault_index.count()} chunks")
+            console.print(f"  last write: {last or 'never — run: jarvis vault sync'}")
+            return 0
+        finally:
+            await sync.memory.embedder.models.aclose()
+
+    try:
+        return asyncio.run(run())
+    finally:
+        asyncio.run(app.aclose())
 
 
 # ---------------------------------------------------------------- tools / audit / reminders
@@ -894,6 +997,8 @@ def _voice_start(settings: Settings, args: argparse.Namespace) -> int:
         app.notifier.add(CallbackNotifier(on_reminder))
         app.scheduler.start()
         app.apps.prefetch()
+        if app.start_vault():
+            app.vault_listeners.append(_print_vault_report)
         try:
             runner.run(app.memory.backfill())
         except ProviderError:
@@ -1028,6 +1133,17 @@ async def _doctor(settings: Settings, quick: bool) -> list[tuple[str, bool | Non
     )
     rows.append(("Tools", True, f"{len(app.registry)} enabled  (see: jarvis tools)"))
     rows.extend(_voice_doctor_rows(settings))
+    if settings.vault.enabled:
+        from jarvis.app import resolve_vault
+
+        vroot = resolve_vault(settings.vault.path)
+        rows.append(
+            (
+                "Obsidian vault",
+                True if vroot.is_dir() else None,
+                str(vroot) if vroot.is_dir() else f"not found: {vroot} (see [vault] path)",
+            )
+        )
     try:
         ref = app.models.roles["chat"]
         rows.append(("Chat model", True, str(ref)))
@@ -1177,6 +1293,12 @@ def build_parser() -> argparse.ArgumentParser:
     vp.add_argument("--play", action="store_true", help="voices: hear each one")
     vp.add_argument("--save", type=Path, help="say: write a .wav instead of playing")
 
+    vt = sub.add_parser(
+        "vault", help="Obsidian vault: status | sync | search TEXT | rebuild | open"
+    )
+    vt.add_argument("action", nargs="?", choices=["status", "sync", "search", "rebuild", "open"])
+    vt.add_argument("rest", nargs="*")
+
     sub.add_parser("tools", help="list tools and their permissions")
     a = sub.add_parser("audit", help="recent tool calls")
     a.add_argument("--limit", type=int, default=30)
@@ -1212,6 +1334,7 @@ def main(argv: list[str] | None = None) -> int:
         "apps": cmd_apps,
         "notify": cmd_notify,
         "voice": cmd_voice,
+        "vault": cmd_vault,
     }
     return handlers[args.command](settings, args)
 

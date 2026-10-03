@@ -7,6 +7,7 @@ components testable and swappable without a DI framework.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -44,10 +45,23 @@ from jarvis.tools import (
 from jarvis.tools.apps import AppCatalog
 from jarvis.tools.base import FilePolicy
 from jarvis.tools.notify import LogNotifier, MultiNotifier, default_notifier
+from jarvis.vault.index import QUERY_PREFIX, VaultIndex
+from jarvis.vault.sync import Report, VaultSync, VaultWorker
 
 log = logging.getLogger(__name__)
 
 DEFAULT_EMBED_MODEL = "ollama:qwen3-embedding:0.6b"
+SUBJECTS_DONE = "meta:subjects-assigned"
+
+
+def resolve_vault(spec: str) -> Path:
+    """ "Documents/obsidian_notes" → the real (OneDrive-aware) Documents folder + rest."""
+    raw = spec.strip().replace("\\", "/")
+    first, _, rest = raw.partition("/")
+    if first.lower() in ("documents", "desktop", "downloads", "pictures", "music", "videos"):
+        base = resolve_root(first)
+        return (base / rest).resolve() if rest else base
+    return resolve_root(spec)
 
 
 class JarvisApp:
@@ -66,6 +80,7 @@ class JarvisApp:
         apps: AppCatalog | None = None,
         file_policy: FilePolicy | None = None,
         provider_factory: Callable[[], Mapping[str, ModelProvider]] | None = None,
+        vault_root: Path | None = None,
     ):
         self.settings = settings
         self.models = models
@@ -101,6 +116,20 @@ class JarvisApp:
         self.scheduler = ReminderScheduler(db, notifier)
         self.apps = apps or AppCatalog()
         self.file_policy = file_policy or FilePolicy()
+        # ---- Obsidian vault
+        vcfg = settings.vault
+        self.vault_root = vault_root
+        self.vault_index: VaultIndex | None = None
+        if vault_root is not None and vcfg.search:
+            self.vault_index = VaultIndex(
+                db,
+                Embedder(models, query_prefix=QUERY_PREFIX),
+                conversations=vcfg.search_conversations,
+            )
+        if self.vault_index is None and registry.get("vault_search"):
+            registry.unregister("vault_search")
+        self.vault_worker: VaultWorker | None = None
+        self.vault_listeners: list[Callable[[Report], None]] = []
 
     @classmethod
     def create(
@@ -184,6 +213,13 @@ class JarvisApp:
             no_write=_paths(fcfg.no_write)
             + [settings.config_dir.resolve(), settings.app.data_dir.resolve()],
         )
+        vault_root = None
+        if settings.vault.enabled and settings.vault.path:
+            candidate = resolve_vault(settings.vault.path)
+            if candidate.is_dir():
+                vault_root = candidate
+            else:
+                log.info("vault folder %s doesn't exist; Obsidian sync off", candidate)
         base_notifier = default_notifier() if tcfg.notifications else MultiNotifier(LogNotifier())
         if notifier is not None:
             base_notifier = MultiNotifier(notifier)
@@ -201,6 +237,7 @@ class JarvisApp:
             apps=apps,
             file_policy=file_policy,
             provider_factory=provider_factory,
+            vault_root=vault_root,
         )
 
     # ------------------------------------------------------------ memory
@@ -249,6 +286,71 @@ class JarvisApp:
             changes = [Change("add" if created else "update", mem.id, mem.text)]
         return changes
 
+    # ------------------------------------------------------------ vault
+
+    def make_vault_sync(self) -> VaultSync:
+        """A VaultSync with its own model clients (it runs on the vault thread)."""
+        assert self.vault_root is not None
+        v = self.settings.vault
+        extractor = self._make_extractor()
+        index = None
+        if v.search:
+            index = VaultIndex(
+                self.db,
+                Embedder(extractor.models, query_prefix=QUERY_PREFIX),
+                conversations=v.search_conversations,
+            )
+        return VaultSync(
+            self.vault_root,
+            self.db,
+            extractor.service,
+            quiet_s=v.quiet_s,
+            conversations=v.conversations,
+            journal=v.journal,
+            inbox=v.inbox,
+            user_name=v.user_name,
+            extractor=extractor if v.inbox else None,
+            index=index,
+        )
+
+    async def prepare_vault(self, sync: VaultSync) -> int:
+        """Once: give memories from before the vault a subject, so they get pages."""
+        from jarvis.memory.extractor import assign_subjects
+
+        with self.db.lock:
+            done = self.db.conn.execute(
+                "SELECT 1 FROM vault_files WHERE key = ?", (SUBJECTS_DONE,)
+            ).fetchone()
+        if done:
+            return 0
+        try:
+            n = await assign_subjects(sync.memory.embedder.models, sync.memory.store)
+        except ProviderError as e:
+            log.info("couldn't sort memories into pages yet: %s", e)
+            return 0
+        sync._save_row(SUBJECTS_DONE, "", "meta")
+        return n
+
+    def start_vault(self) -> bool:
+        """Start syncing the vault in the background (no-op if there's no vault)."""
+        if self.vault_root is None:
+            return False
+        if self.vault_worker is None:
+            self.vault_worker = VaultWorker(
+                self.make_vault_sync,
+                interval_s=self.settings.vault.poll_s,
+                on_report=self._vault_report,
+                prepare=self.prepare_vault,
+            )
+            self.vault_worker.start()
+        return True
+
+    def _vault_report(self, report: Report) -> None:
+        if report.changes:
+            self._memory_changed(report.changes)
+        for listener in list(self.vault_listeners):
+            listener(report)
+
     def tool_context(self, conversation_id: int | None = None) -> ToolContext:
         return ToolContext(
             db=self.db,
@@ -260,6 +362,7 @@ class JarvisApp:
             apps=self.apps,
             files=self.file_policy,
             memory=self.memory,
+            vault=self.vault_index,
         )
 
     async def chat_stream(
@@ -301,6 +404,11 @@ class JarvisApp:
             yield chunk
 
     async def aclose(self) -> None:
+        if self.vault_worker is not None:
+            # Let the vault thread finish its cycle before the database closes.
+            finished = await asyncio.to_thread(self.vault_worker.stop, 30)
+            if not finished:
+                log.warning("vault sync still running at shutdown")
         self.scheduler.stop()
         self.memory_worker.close()
         await self.models.aclose()
