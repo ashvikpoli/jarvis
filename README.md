@@ -2,14 +2,17 @@
 
 A local-first personal AI assistant for Windows, built layer by layer.
 
-**Current phase: 4.5 — Obsidian second brain.** Everything Jarvis knows (memory,
+**Current phase: 5 — Seeing the screen, mouse & keyboard.** Ask "what's this error?"
+and Jarvis looks at your screen; ask it to click, type, scroll or arrange windows and it
+does — asking once per task, always asking before sending/deleting/closing. **Esc Esc**
+stops it. Phase 4.5: everything Jarvis knows (memory,
 notes, reminders, conversations, a daily journal) lives as Markdown pages in your
 Obsidian vault — edit them and Jarvis learns from your edits; it also searches the
 notes you write. Phase 4: tap **Left Ctrl**, speak, and Jarvis answers out loud in a
 British voice — everything local (faster-whisper on the GPU, Kokoro TTS).
 Built on Phase 3's long-term memory, Phase 2's tools (files, apps, notes, reminders —
 every action permission-checked and audited) and Phase 1's saved conversations and evals.
-Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md) · [phase 4](docs/phase-4.md) · [phase 4.5](docs/phase-4.5.md).
+Specs: [phase 0](docs/phase-0.md) · [phase 1](docs/phase-1.md) · [phase 2](docs/phase-2.md) · [phase 3](docs/phase-3.md) · [phase 4](docs/phase-4.md) · [phase 4.5](docs/phase-4.5.md) · [phase 5](docs/phase-5.md).
 Full test checklist: [docs/testing.md](docs/testing.md).
 
 ## Setup (Windows, native — not WSL)
@@ -84,6 +87,20 @@ Stream from the API:
 curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
   -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'
 ```
+
+## Screen, mouse & keyboard (Phase 5)
+
+One-time: `ollama pull qwen3-vl:8b`. Then just ask in chat or voice:
+*"what's on my screen?"*, *"type 'on my way' in Discord"*, *"open a new tab and search
+for…"*, *"put Chrome on the left and Spotify on the right"*.
+
+- Looking never asks. The first click/keypress of a task asks once; Send/Delete/Pay,
+  Enter, Alt+F4 and closing windows always ask on their own.
+- **Esc Esc** or grabbing the mouse stops everything.
+- Never touches password managers or Windows Security; never types into password
+  fields, terminals or the Run dialog.
+- Try it: `uv run jarvis desktop windows`, `… desktop look "what's here?" --delay 3`,
+  `… desktop elements Chrome`. Details: [docs/phase-5.md](docs/phase-5.md).
 
 ## Obsidian second brain (Phase 4.5)
 
@@ -215,6 +232,7 @@ src/jarvis/
   memory/             long-term memory: store, embeddings, recall, background learning
   voice/              mic + VAD, Whisper STT, Kokoro TTS, hotkey, VoiceSession
   vault/              Obsidian pages ⇄ database (two-way sync), vault search index
+  desktop/            screen capture, UI Automation, vision, mouse/keyboard, safety guard
   tools/              tool framework + files, system/apps, notes/reminders, memory
   evals/              eval checks + runner
   interfaces/         cli.py, api.py
@@ -224,5 +242,5 @@ evals/cases.toml      eval cases — add one whenever Jarvis gets something wron
 ## Roadmap
 
 0 Foundation ✅ · 1 Conversation + evals ✅ · 2 Tools + permissions ✅ · 3 Memory (testing) ·
-4 Voice MVP (testing) · 4.5 Obsidian second brain (testing) · 5 Desktop control + vision · 6 Automation · 7 Advanced voice ·
+4 Voice MVP (testing) · 4.5 Obsidian second brain (testing) · 5 Desktop control + vision (testing) · 6 Automation · 7 Advanced voice ·
 8 Polish + packaging

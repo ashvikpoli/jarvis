@@ -222,6 +222,7 @@ def cmd_chat(settings: Settings, args: argparse.Namespace) -> int:
         app.apps.prefetch()  # so the first "open X" doesn't wait for the app scan
         if app.start_vault():
             app.vault_listeners.append(_print_vault_report)
+        app.start_desktop()  # Esc Esc stops screen control
         try:
             runner.run(app.memory.backfill())  # also loads the embedding model
         except ProviderError:
@@ -450,6 +451,66 @@ def cmd_memory(settings: Settings, args: argparse.Namespace) -> int:
     finally:
         asyncio.run(app.aclose())
     return code
+
+
+# ---------------------------------------------------------------- desktop
+
+
+def cmd_desktop(settings: Settings, args: argparse.Namespace) -> int:
+    """Try screen control by hand: windows | look Q | elements [WINDOW] | find WHAT."""
+    app = JarvisApp.create(settings)
+    d = app.desktop
+    if d is None:
+        console.print(
+            "[red]✗ Screen control isn't available (Windows only, \\[desktop] enabled).[/]"
+        )
+        asyncio.run(app.aclose())
+        return 1
+    action = args.action or "windows"
+    rest = " ".join(args.rest)
+
+    async def countdown() -> None:
+        if args.delay:
+            console.print(f"[dim]Switch to the window you want — {args.delay} s…[/]")
+            await asyncio.sleep(args.delay)
+
+    async def run() -> int:
+        if action == "windows":
+            for w in await d.windows():
+                console.print("  " + w.label(), highlight=False)
+        elif action == "look":
+            await countdown()
+            t0 = time.perf_counter()
+            with console.status("Looking…"):
+                out = await d.look(rest or "Describe what's on the screen.", args.where)
+            console.print(out, highlight=False)
+            console.print(f"[dim]{(time.perf_counter() - t0):.1f} s[/]")
+        elif action == "elements":
+            await countdown()
+            t0 = time.perf_counter()
+            els = await d.elements(rest or None)
+            w = d._elements_window
+            console.print(
+                f"[bold]{w.title}[/] ({w.process}) — {len(els)} controls", highlight=False
+            )
+            for e in els:
+                console.print("  " + e.label(), highlight=False)
+            console.print(f"[dim]{(time.perf_counter() - t0):.1f} s[/]")
+        elif action == "find":
+            await countdown()
+            with console.status("Looking for it…"):
+                x, y, what, w = await d.locate(rest)
+            console.print(f"Found “{what}” in {w.title} at ({x}, {y}) — moving the mouse there.")
+            await d._call(d.backend.click, x, y, "left", 0)  # count 0 = move, don't click
+        return 0
+
+    try:
+        return asyncio.run(run())
+    except Exception as e:
+        console.print(f"[red]✗ {e}[/]")
+        return 1
+    finally:
+        asyncio.run(app.aclose())
 
 
 # ---------------------------------------------------------------- vault
@@ -999,6 +1060,7 @@ def _voice_start(settings: Settings, args: argparse.Namespace) -> int:
         app.apps.prefetch()
         if app.start_vault():
             app.vault_listeners.append(_print_vault_report)
+        app.start_desktop()  # Esc Esc stops screen control
         try:
             runner.run(app.memory.backfill())
         except ProviderError:
@@ -1176,6 +1238,20 @@ async def _doctor(settings: Settings, quick: bool) -> list[tuple[str, bool | Non
                     else f"run:  ollama pull {emb.model}   (until then: keyword recall)",
                 )
             )
+        vis = app.models.roles.get("vision")
+        if settings.desktop.enabled and vis is not None and vis.provider == provider.name:
+            vis_model = vis.model if ":" in vis.model else f"{vis.model}:latest"
+            have = vis_model in available or vis.model in available
+            where = "ready" if app.desktop is not None else "Windows only"
+            rows.append(
+                (
+                    "Screen control",
+                    have if app.desktop is not None else None,
+                    f"{where} · vision {vis}"
+                    if have
+                    else f"run:  ollama pull {vis.model}   (to see the screen)",
+                )
+            )
         if not pulled or quick:
             return rows
 
@@ -1293,6 +1369,14 @@ def build_parser() -> argparse.ArgumentParser:
     vp.add_argument("--play", action="store_true", help="voices: hear each one")
     vp.add_argument("--save", type=Path, help="say: write a .wav instead of playing")
 
+    dk = sub.add_parser(
+        "desktop", help="try screen control: windows | look Q | elements [WINDOW] | find WHAT"
+    )
+    dk.add_argument("action", nargs="?", choices=["windows", "look", "elements", "find"])
+    dk.add_argument("rest", nargs="*")
+    dk.add_argument("--delay", type=int, default=3, help="seconds to switch windows first")
+    dk.add_argument("--where", choices=["window", "screen"], default="window")
+
     vt = sub.add_parser(
         "vault", help="Obsidian vault: status | sync | search TEXT | rebuild | open"
     )
@@ -1335,6 +1419,7 @@ def main(argv: list[str] | None = None) -> int:
         "notify": cmd_notify,
         "voice": cmd_voice,
         "vault": cmd_vault,
+        "desktop": cmd_desktop,
     }
     return handlers[args.command](settings, args)
 

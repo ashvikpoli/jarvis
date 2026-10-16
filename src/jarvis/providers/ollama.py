@@ -32,6 +32,8 @@ def _to_ollama(m: Message) -> dict[str, Any]:
         ]
     if m.role == "tool" and m.tool_name:
         out["tool_name"] = m.tool_name
+    if m.images:
+        out["images"] = list(m.images)
     return out
 
 

@@ -120,7 +120,7 @@ class FileToolSettings(BaseModel):
 
 class ToolsSettings(BaseModel):
     enabled: bool = True
-    max_steps: int = 6
+    max_steps: int = 15
     disabled: list[str] = Field(default_factory=list)  # tool names to leave out entirely
     permissions: ToolPermissions = Field(default_factory=ToolPermissions)
     files: FileToolSettings = Field(default_factory=FileToolSettings)
@@ -183,6 +183,18 @@ class VaultSettings(BaseModel):
     search: bool = True  # index your notes for vault_search
     search_conversations: bool = False  # also search chat transcripts
     user_name: str = "You"  # how you're labelled in transcripts
+
+
+class DesktopSettings(BaseModel):
+    """Seeing the screen and using mouse & keyboard (Windows)."""
+
+    enabled: bool = True
+    max_image_side: int = 1280  # screenshots are scaled to this before the vision model
+    element_limit: int = 80  # controls listed per window
+    # Never looked at or controlled; add apps by their .exe name. None = built-in list.
+    blocked_apps: list[str] | None = None
+    no_typing_apps: list[str] | None = None  # never typed into (terminals); None = built-in
+    takeover_px: int = 40  # moving the mouse this far yourself stops Jarvis
 
 
 class OllamaSettings(BaseModel):
@@ -253,6 +265,7 @@ class Settings(BaseSettings):
     memory: MemorySettings = Field(default_factory=MemorySettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     vault: VaultSettings = Field(default_factory=VaultSettings)
+    desktop: DesktopSettings = Field(default_factory=DesktopSettings)
     providers: ProvidersSettings = Field(default_factory=ProvidersSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 

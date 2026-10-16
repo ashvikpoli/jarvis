@@ -48,6 +48,119 @@ SANDBOX_MEMORIES = [
 ]
 
 
+class EvalVision:
+    """Stands in for the vision model: the eval tests the chat model's choices."""
+
+    async def look(self, image_b64: str, question: str) -> str:
+        return (
+            "A Discord window, channel #general. In front of it an error box titled "
+            "'Discord Update' says: 'Update failed — not enough disk space (error 0x70)'."
+        )
+
+    async def locate(self, image_b64: str, description: str):
+        return 0.5, 0.5, description
+
+
+def make_eval_desktop():
+    """A pretend desktop (Discord, Spotify, Chrome) that records instead of acting."""
+    from jarvis.desktop import Desktop, Element, Rect, Window
+    from jarvis.desktop.guard import Guard
+    from jarvis.desktop.model import Shot
+
+    term = Window(1, "Jarvis", "WindowsTerminal.exe", Rect(0, 0, 900, 600), True)
+    discord = Window(2, "#general - Discord", "Discord.exe", Rect(0, 0, 1600, 1000))
+    spotify = Window(3, "Spotify Premium", "Spotify.exe", Rect(0, 0, 1600, 1000))
+    chrome = Window(4, "New Tab - Google Chrome", "chrome.exe", Rect(0, 0, 1600, 1000))
+    controls = {
+        2: [
+            ("Edit", "Message #general", Rect(300, 900, 1400, 950)),
+            ("Button", "Send", Rect(1410, 900, 1480, 950)),
+            ("ListItem", "general", Rect(10, 100, 200, 130)),
+            ("ListItem", "random", Rect(10, 130, 200, 160)),
+            ("Button", "User Settings", Rect(10, 950, 50, 990)),
+            ("Button", "Mute", Rect(60, 950, 100, 990)),
+        ],
+        3: [
+            ("Button", "Play", Rect(780, 940, 820, 980)),
+            ("Button", "Next", Rect(830, 940, 870, 980)),
+            ("Edit", "What do you want to play?", Rect(500, 20, 1100, 60)),
+        ],
+        4: [
+            ("Edit", "Address and search bar", Rect(100, 50, 1500, 90)),
+            ("Button", "New Tab", Rect(300, 5, 330, 35)),
+        ],
+    }
+
+    class Backend:
+        def __init__(self):
+            self.wins = [term, discord, spotify, chrome]
+            self.fg = 1
+            self.actions: list = []
+            self.pos = (0, 0)
+
+        def windows(self):
+            return [Window(**{**w.__dict__, "active": w.handle == self.fg}) for w in self.wins]
+
+        def active_window(self):
+            return next(w for w in self.windows() if w.handle == self.fg)
+
+        def screenshot(self, window, whole_screen, max_side, hide):
+            return Shot("", window.rect, (1280, 800))
+
+        def window_at(self, x, y):
+            return next(w for w in self.windows() if w.handle == self.fg)
+
+        def element_at(self, x, y):
+            return None
+
+        def visible_windows(self):
+            return [w for w in self.windows() if not w.minimized]
+
+        def on_screen(self, x, y):
+            return True
+
+        def refresh(self, el):
+            return el
+
+        def responding(self, window):
+            return True
+
+        def elements(self, window, limit):
+            return [Element(k, n, r) for k, n, r in controls.get(window.handle, [])]
+
+        def focused_element(self):
+            return None
+
+        def invoke(self, el):
+            return True
+
+        def focus_element(self, el):
+            pass
+
+        def click(self, x, y, button, count):
+            self.pos = (x, y)
+            self.actions.append(("click", x, y))
+
+        def type_text(self, text):
+            self.actions.append(("type", text))
+
+        def keys(self, combo):
+            self.actions.append(("keys", combo))
+
+        def scroll(self, x, y, dx, dy):
+            self.pos = (x, y)
+
+        def cursor(self):
+            return self.pos
+
+        def window_action(self, window, action):
+            self.actions.append(("window", window.process, action))
+            if action == "focus":
+                self.fg = window.handle
+
+    return Desktop(Backend(), EvalVision(), Guard(), run_inline=True, settle_s=0, own_windows={1})
+
+
 class RecordingLauncher:
     def __init__(self):
         self.opened: list[str] = []
@@ -115,5 +228,6 @@ def make_sandbox() -> Sandbox:
         launcher=RecordingLauncher(),
         notifier=RecordingNotifier(),
         apps=StaticAppCatalog(SANDBOX_APPS),
+        desktop=make_eval_desktop(),
     )
     return Sandbox(root=root, ctx=ctx)

@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.6.0"
+version = "0.7.0"
 description = "A local-first personal AI assistant"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,10 @@ dependencies = [
     "espeakng-loader>=0.2.4",       # bundled espeak-ng library + data
     "sounddevice>=0.5",             # microphone + speakers
     "pynput>=1.8",                  # global push-to-talk hotkey
+    # Phase 5 — screen & mouse/keyboard
+    "pillow>=10.4",                 # screenshots -> JPEG for the vision model
+    "mss>=9.0",                     # screen capture fallback
+    "uiautomation>=2.0.20; sys_platform == 'win32'",  # buttons/fields via UI Automation
     # CUDA libraries for GPU speech recognition (Windows; ~1.2 GB, downloaded once)
     "nvidia-cublas-cu12>=12.4; sys_platform == 'win32'",
     "nvidia-cudnn-cu12>=9.1,<10; sys_platform == 'win32'",

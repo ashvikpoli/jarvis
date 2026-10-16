@@ -51,7 +51,40 @@ from jarvis.vault.sync import Report, VaultSync, VaultWorker
 log = logging.getLogger(__name__)
 
 DEFAULT_EMBED_MODEL = "ollama:qwen3-embedding:0.6b"
+DEFAULT_VISION_MODEL = "ollama:qwen3-vl:8b"
 SUBJECTS_DONE = "meta:subjects-assigned"
+
+
+DESKTOP_SAFE = ("screen_look", "ui_elements", "windows_list")
+
+
+def _make_desktop(settings: Settings, models: ModelManager):
+    """The real Windows desktop, or None (other OS, turned off, or it can't start)."""
+    import sys
+
+    d = settings.desktop
+    if not d.enabled or sys.platform != "win32":
+        return None
+    try:
+        from jarvis.desktop import Desktop
+        from jarvis.desktop.guard import Guard
+        from jarvis.desktop.vision import Vision
+        from jarvis.desktop.windows import WindowsBackend, init_thread, own_windows
+
+        return Desktop(
+            WindowsBackend(),
+            Vision(models),
+            Guard(takeover_px=d.takeover_px),
+            blocked_apps=d.blocked_apps,
+            no_typing_apps=d.no_typing_apps,
+            max_side=d.max_image_side,
+            element_limit=d.element_limit,
+            initializer=init_thread,
+            own_windows=own_windows(),
+        )
+    except Exception as e:  # missing package, no desktop session …
+        log.warning("screen control unavailable: %s", e)
+        return None
 
 
 def resolve_vault(spec: str) -> Path:
@@ -81,6 +114,7 @@ class JarvisApp:
         file_policy: FilePolicy | None = None,
         provider_factory: Callable[[], Mapping[str, ModelProvider]] | None = None,
         vault_root: Path | None = None,
+        desktop=None,
     ):
         self.settings = settings
         self.models = models
@@ -130,6 +164,11 @@ class JarvisApp:
             registry.unregister("vault_search")
         self.vault_worker: VaultWorker | None = None
         self.vault_listeners: list[Callable[[Report], None]] = []
+        # ---- screen & mouse/keyboard
+        self.desktop = desktop
+        if not settings.desktop.enabled:
+            for t in [t for t in registry.tools if t.group == "desktop" or t.name in DESKTOP_SAFE]:
+                registry.unregister(t.name)
 
     @classmethod
     def create(
@@ -142,6 +181,7 @@ class JarvisApp:
         notifier: Notifier | None = None,
         file_roots: list[Path] | None = None,
         apps: AppCatalog | None = None,
+        desktop=None,
     ) -> JarvisApp:
         settings = settings or load_settings()
         if providers is None:
@@ -159,6 +199,10 @@ class JarvisApp:
         roles = dict(settings.models.roles)
         roles.setdefault("embed", DEFAULT_EMBED_MODEL)
         roles.setdefault("memory", roles["chat"])  # same model → no VRAM swap
+        # A vision chat model sees screenshots itself (one model in VRAM); else qwen3-vl.
+        roles.setdefault(
+            "vision", roles["chat"] if "-vl" in roles["chat"] else DEFAULT_VISION_MODEL
+        )
         models = ModelManager(
             providers,
             roles,
@@ -238,6 +282,7 @@ class JarvisApp:
             file_policy=file_policy,
             provider_factory=provider_factory,
             vault_root=vault_root,
+            desktop=desktop if desktop is not None else _make_desktop(settings, models),
         )
 
     # ------------------------------------------------------------ memory
@@ -345,6 +390,13 @@ class JarvisApp:
             self.vault_worker.start()
         return True
 
+    def start_desktop(self) -> bool:
+        """Listen for the Esc Esc panic key (chat / voice / serve)."""
+        if self.desktop is None:
+            return False
+        self.desktop.guard.start()
+        return True
+
     def _vault_report(self, report: Report) -> None:
         if report.changes:
             self._memory_changed(report.changes)
@@ -363,6 +415,7 @@ class JarvisApp:
             files=self.file_policy,
             memory=self.memory,
             vault=self.vault_index,
+            desktop=self.desktop,
         )
 
     async def chat_stream(
@@ -404,6 +457,8 @@ class JarvisApp:
             yield chunk
 
     async def aclose(self) -> None:
+        if self.desktop is not None:
+            self.desktop.close()
         if self.vault_worker is not None:
             # Let the vault thread finish its cycle before the database closes.
             finished = await asyncio.to_thread(self.vault_worker.stop, 30)

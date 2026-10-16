@@ -71,6 +71,7 @@ class ToolContext:
     files: FilePolicy = field(default_factory=FilePolicy)
     memory: Any = None  # MemoryService; None = memory off
     vault: Any = None  # VaultIndex; None = no Obsidian vault
+    desktop: Any = None  # Desktop (screen, mouse, keyboard); None = not available
     clock: Any = field(default=lambda: datetime.now().astimezone())
 
 
@@ -83,6 +84,9 @@ class Tool(ABC):
     description: ClassVar[str]
     risk: ClassVar[Risk] = Risk.SAFE
     Args: ClassVar[type[BaseModel]] = NoArgs
+    # Tools in a group share one approval per task ("control mouse & keyboard?"):
+    # approving the first one allows the rest of the group until the reply ends.
+    group: ClassVar[str | None] = None
 
     def risk_for(self, args: BaseModel) -> Risk:
         """Risk can depend on arguments (e.g. overwrite=True). Default: static."""

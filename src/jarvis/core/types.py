@@ -28,6 +28,8 @@ class Message(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list)  # assistant asking for tools
     tool_name: str | None = None  # on role="tool": which tool produced this result
     tool_call_id: str | None = None  # on role="tool": which call this answers
+    # Base64 images (PNG/JPEG) for vision models. Never stored — screenshots aren't kept.
+    images: list[str] = Field(default_factory=list)
 
     @classmethod
     def system(cls, content: str) -> Message:

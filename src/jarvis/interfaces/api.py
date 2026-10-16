@@ -108,6 +108,7 @@ def create_api(settings: Settings | None = None, jarvis: JarvisApp | None = None
         if owned:
             api.state.jarvis.scheduler.start()  # reminders fire while the server runs
             api.state.jarvis.start_vault()  # keep the Obsidian vault in sync
+            api.state.jarvis.start_desktop()  # Esc Esc stops screen control
             api.state.jarvis.apps.prefetch()
         yield
         if owned:

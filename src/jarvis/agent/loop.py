@@ -7,13 +7,14 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import aclosing
 from typing import Any
 
 from pydantic import ValidationError
 
 from jarvis.core.types import Message, StreamChunk, ToolCall, ToolEvent, Usage
 from jarvis.providers import ModelManager
-from jarvis.tools.base import ToolContext, ToolError
+from jarvis.tools.base import Risk, ToolContext, ToolError
 from jarvis.tools.registry import (
     ApprovalRequest,
     Approver,
@@ -27,6 +28,8 @@ log = logging.getLogger(__name__)
 
 MAX_RESULT_CHARS = 6000  # what the model sees of a tool result
 TOOL_TIMEOUT_S = 30
+# How a group's one-per-task approval is worded (the first action is appended).
+GROUP_ASK = {"desktop": "control your mouse and keyboard for this task"}
 
 # Called for every message the loop produces, so callers can persist them.
 OnMessage = Callable[..., None]
@@ -76,6 +79,24 @@ class AgentLoop:
         assistant/tool message as it's finalised. If the consumer stops early, the
         partial assistant text is reported with interrupted=True.
         """
+        # A new reply = a new task: groups ("control mouse & keyboard?") ask again.
+        granted: set[str] = set()
+        desktop = getattr(ctx, "desktop", None)
+        if desktop is not None and hasattr(desktop, "new_turn"):
+            desktop.new_turn()  # clears a previous Esc-Esc stop
+        try:
+            async with aclosing(
+                self._run(messages, ctx, approver, granted, role, options, on_message, use_tools)
+            ) as chunks:
+                async for chunk in chunks:
+                    yield chunk
+        finally:
+            if desktop is not None and hasattr(desktop, "end_turn"):
+                desktop.end_turn()
+
+    async def _run(
+        self, messages, ctx, approver, granted, role, options, on_message, use_tools
+    ) -> AsyncIterator[StreamChunk]:
         msgs = list(messages)
         specs = self.registry.specs(ctx) if use_tools and len(self.registry) else None
         total = Usage(prompt_tokens=0, completion_tokens=0, total_ms=0.0)
@@ -126,7 +147,7 @@ class AgentLoop:
 
             for call in calls:
                 yield StreamChunk(event=ToolEvent(kind="call", call=call))
-                result, event = await self._execute(call, ctx, approver)
+                result, event = await self._execute(call, ctx, approver, granted)
                 yield StreamChunk(event=event)
                 on_message(result)
                 msgs.append(result)
@@ -144,8 +165,14 @@ class AgentLoop:
         yield StreamChunk(done=True, usage=total)
 
     async def _execute(
-        self, call: ToolCall, ctx: ToolContext, approver: Approver | None
+        self,
+        call: ToolCall,
+        ctx: ToolContext,
+        approver: Approver | None,
+        granted: set[str] | None = None,
     ) -> tuple[Message, ToolEvent]:
+        granted = set() if granted is None else granted
+
         def result(kind: str, text: str) -> tuple[Message, ToolEvent]:
             return (
                 Message.tool(text, call.name, call.id),
@@ -166,21 +193,35 @@ class AgentLoop:
 
         decision, risk = self.policy.decide(tool, args, ctx)
         how = "allowed"
+        group = tool.group
+        explicit_ask = self.policy.overrides.get(tool.name) == Decision.ASK  # your setting wins
+        if (
+            decision == Decision.ASK
+            and group in granted
+            and risk != Risk.DESTRUCTIVE
+            and not explicit_ask
+        ):
+            decision, how = Decision.ALLOW, "approved_task"  # already OK'd for this task
         if decision == Decision.ASK:
+            description = tool.describe_in(args, ctx)
+            if group in GROUP_ASK and risk != Risk.DESTRUCTIVE:
+                description = f"{GROUP_ASK[group]} — first: {description}"
             if approver is None:
                 decision, how = Decision.DENY, "denied"
                 reason = "This action needs the user's approval, which isn't available here."
             else:
                 answer = await approver(
-                    ApprovalRequest(
-                        tool=tool, args=args, risk=risk, description=tool.describe_in(args, ctx)
-                    )
+                    ApprovalRequest(tool=tool, args=args, risk=risk, description=description)
                 )
                 if answer == "session":
-                    self.policy.allow_for_session(tool.name)
+                    names = [t.name for t in self.registry.tools if group and t.group == group]
+                    for name in names or [tool.name]:
+                        self.policy.allow_for_session(name)
                     how = "approved_session"
                 elif answer == "once":
                     how = "approved"
+                    if group and risk != Risk.DESTRUCTIVE:
+                        granted.add(group)  # the rest of this task needn't ask
                 else:
                     decision, how = Decision.DENY, "denied"
                     reason = (

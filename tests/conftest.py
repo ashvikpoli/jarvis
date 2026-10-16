@@ -47,6 +47,8 @@ def make_app(tmp_path, roots):
         cfg.mkdir()
         if "[vault]" not in config:  # never touch a real vault from tests
             config += "\n[vault]\nenabled = false\n"
+        if "[desktop]" not in config:  # …or the real screen / mouse
+            config += "\n[desktop]\nenabled = false\n"
         (cfg / "default.toml").write_text(
             '[models]\nroles = { chat = "scripted:main" }\n' + config, encoding="utf-8"
         )
