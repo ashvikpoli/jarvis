@@ -37,7 +37,7 @@ LOCATE_SCHEMA = {
 
 
 class Vision:
-    """Wraps the `vision` model role (e.g. ollama:qwen3-vl:8b)."""
+    """Wraps the `vision` model role (e.g. ollama:qwen3-vl:8b-instruct)."""
 
     def __init__(self, models: ModelManager, role: str = "vision"):
         self.models = models
@@ -60,7 +60,10 @@ class Vision:
             Message(role="user", content=question or "What's on the screen?", images=[image_b64]),
         ]
         text = await self._ask(msgs, {"think": False, "temperature": 0.2})
-        return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+        if "</think>" in text:  # a thinking-only model leaked its reasoning
+            text = text.rsplit("</think>", 1)[1]
+        return text.strip()
 
     async def locate(self, image_b64: str, description: str) -> tuple[float, float, str] | None:
         """(x, y) as fractions of the image (0..1) and what it found — or None."""

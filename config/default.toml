@@ -36,7 +36,7 @@ json_file = true
 # role -> "<provider>:<model>". Code asks for a role; config decides the model.
 # Chosen from Phase 1 evals: qwen3:8b beat qwen3:14b (34/35 vs 31/35, no
 # hallucinations, 146 vs 87 tok/s) and leaves ~4 GB more VRAM free.
-roles = { chat = "ollama:qwen3:8b", embed = "ollama:qwen3-embedding:0.6b", vision = "ollama:qwen3-vl:8b" }
+roles = { chat = "ollama:qwen3:8b", embed = "ollama:qwen3-embedding:0.6b", vision = "ollama:qwen3-vl:8b-instruct" }
 
 # Per-role generation options. `think = false` skips the reasoning phase of
 # thinking models (much faster first answer). Toggle live in chat with /think on.

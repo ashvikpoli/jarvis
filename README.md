@@ -90,7 +90,7 @@ curl.exe -N http://127.0.0.1:8765/v1/chat -H "Content-Type: application/json" `
 
 ## Screen, mouse & keyboard (Phase 5)
 
-One-time: `ollama pull qwen3-vl:8b`. Then just ask in chat or voice:
+One-time: `ollama pull qwen3-vl:8b-instruct`. Then just ask in chat or voice:
 *"what's on my screen?"*, *"type 'on my way' in Discord"*, *"open a new tab and search
 for…"*, *"put Chrome on the left and Spotify on the right"*.
 

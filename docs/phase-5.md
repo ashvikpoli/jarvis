@@ -19,7 +19,7 @@ doesn't. Sending, deleting, paying and closing always ask on their own.
 | Layer | What | Why |
 |---|---|---|
 | UI Automation (`uiautomation`) | Lists the buttons, fields, links, tabs, menu items of a window, with ids | Exact and fast; works in most Windows apps, Chrome, Edge, Office, Settings, Discord |
-| Vision (`qwen3-vl:8b`) | Reads a screenshot: answers questions, or finds "the blue Join button" (0–1000 coordinates → pixels) | For games, canvases, images, and apps that hide their controls |
+| Vision (`qwen3-vl:8b-instruct`) | Reads a screenshot: answers questions, or finds "the blue Join button" (0–1000 coordinates → pixels) | For games, canvases, images, and apps that hide their controls |
 | Input | `SendInput` (unicode typing), pynput (mouse/keys), `user32` window moves | |
 | Capture | `PrintWindow` (the window even when covered) → `mss` fallback; JPEG ≤1280 px | |
 
@@ -68,7 +68,7 @@ uv run jarvis desktop find "the search box" --delay 3      # where vision thinks
 
 ```toml
 [models.roles]
-vision = "ollama:qwen3-vl:8b"
+vision = "ollama:qwen3-vl:8b-instruct"
 
 [desktop]
 enabled = true
@@ -79,15 +79,16 @@ element_limit = 80
 takeover_px = 40
 ```
 
-## 6. VRAM
+## 6. VRAM & model tags
 
-qwen3:8b (chat) + qwen3-vl:8b (vision) don't both fit next to your other apps on 16 GB.
-Ollama swaps them (a few seconds the first time you ask about the screen). Option:
-use **qwen3-vl:8b for chat too** — one model, no swaps. Compare first:
+On the RTX 5090 (32 GB) chat (qwen3:8b ~5 GB), vision (qwen3-vl:8b-instruct ~6 GB),
+embeddings (~1 GB) and Whisper (~2 GB) all stay loaded — no swapping.
 
-```
-uv run jarvis eval --models ollama:qwen3:8b,ollama:qwen3-vl:8b
-```
+Use the **instruct** tags. In Ollama, plain `qwen3-vl:8b` and `qwen3:30b-a3b` are the
+*thinking-only* models: `think = false` can't switch their reasoning off, so replies
+are slow (qwen3-vl:8b: 1.2 s to first word, some empty replies) or full of reasoning
+(qwen3:30b-a3b: 71 % in evals, all of it word-count failures — the answers after
+`</think>` were right). Instruct tags: `qwen3-vl:8b-instruct`, `qwen3:30b-instruct`.
 
 ## 7. Known limits
 

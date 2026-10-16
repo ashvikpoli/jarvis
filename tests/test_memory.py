@@ -219,6 +219,24 @@ async def test_extractor_reports_duplicates():
     assert [c.op for c in changes] == ["duplicate"] and svc.store.count() == 1
 
 
+async def test_extractor_schema_forces_every_field_and_dry_run_saves_nothing():
+    from jarvis.memory.extractor import EXTRACT_SCHEMA
+
+    item = EXTRACT_SCHEMA["properties"]["operations"]["items"]
+    # Constrained decoding only writes required fields — "op" alone gave texts-less adds.
+    assert set(item["required"]) == set(item["properties"])
+    provider = ScriptedProvider()
+    svc = make_service(provider)
+    ex = MemoryExtractor(svc.embedder.models, svc)
+    provider.turns = [ops({"op": "add", "text": "User's name is Adi.", "category": "profile"})]
+    assert await ex.extract("Hi, I'm Adi by the way.", force=True, dry_run=True) == []
+    assert ex.last_ops[0]["text"] == "User's name is Adi." and '"add"' in ex.last_raw
+    assert svc.store.count() == 0
+    assert provider.calls[-1]["options"]["num_predict"] > 0  # can't loop forever
+    provider.turns = [ops({"op": "add"})]  # no text → nothing saved, no crash
+    assert await ex.extract("Hi, I'm Adi by the way.") == []
+
+
 def test_worker_runs_in_background_thread():
     provider = ScriptedProvider([ops({"op": "add", "text": "User owns a dog named Bruno."})])
     svc = make_service(provider)

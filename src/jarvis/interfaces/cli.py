@@ -411,6 +411,28 @@ def _print_memories(app: JarvisApp) -> None:
     console.print(f"[dim]{len(items)} memories · memory {state} · /forget ID to delete[/]")
 
 
+def _memory_try(app: JarvisApp, text: str) -> int:
+    """What would Jarvis learn from this message? Shows the model's raw answer; saves nothing."""
+    from jarvis.memory.extractor import MemoryExtractor
+
+    if not text:
+        console.print('Usage: jarvis memory try "I moved to Austin last month"')
+        return 1
+    ex = MemoryExtractor(app.models, app.memory)
+    asyncio.run(ex.extract(text, force=True, dry_run=True))
+    console.print("[bold]Model said:[/]")
+    console.print(ex.last_raw or "[yellow](nothing)[/]", markup=False, highlight=False)
+    console.print("[bold]Would do:[/]")
+    for op in ex.last_ops:
+        line = escape(f"  {op.get('op')}: {op.get('text') or '(no text!)'}")
+        tag = escape(f"[{op.get('category')} · {op.get('subject')}]")
+        console.print(f"{line}  [dim]{tag}[/]", highlight=False)
+    if not ex.last_ops:
+        console.print("  [dim]nothing[/]")
+    console.print("[dim]Nothing was saved.[/]")
+    return 0
+
+
 def cmd_memory(settings: Settings, args: argparse.Namespace) -> int:
     app = JarvisApp.create(settings)
     code = 0
@@ -427,6 +449,8 @@ def cmd_memory(settings: Settings, args: argparse.Namespace) -> int:
                 )
             if not hits:
                 console.print("[dim]Nothing found.[/]")
+        elif action == "try":
+            code = _memory_try(app, " ".join(args.rest))
         elif action == "forget":
             for raw in args.rest:
                 mid = int(raw.lstrip("#"))
@@ -445,7 +469,8 @@ def cmd_memory(settings: Settings, args: argparse.Namespace) -> int:
             console.print(f"Exported {len(data)} memories to {path.resolve()}")
         else:
             console.print(
-                "Usage: jarvis memory [list | search TEXT | forget ID... | clear | export FILE]"
+                "Usage: jarvis memory [list | search TEXT | try TEXT | forget ID... | clear | "
+                "export FILE]"
             )
             code = 1
     finally:
@@ -1349,9 +1374,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int)
 
     mem = sub.add_parser(
-        "memory", help="what Jarvis remembers: list | search | forget | clear | export"
+        "memory", help="what Jarvis remembers: list | search | try | forget | clear | export"
     )
-    mem.add_argument("action", nargs="?", choices=["list", "search", "forget", "clear", "export"])
+    mem.add_argument(
+        "action", nargs="?", choices=["list", "search", "try", "forget", "clear", "export"]
+    )
     mem.add_argument("rest", nargs="*")
 
     vp = sub.add_parser(

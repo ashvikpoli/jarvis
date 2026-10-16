@@ -304,6 +304,11 @@ async def test_vision_sends_the_image_and_reads_coordinates(make_app):
     assert "images" not in _to_ollama(Message.user("hi"))
 
 
+async def test_vision_drops_reasoning_a_thinking_model_leaks(make_app):
+    app, _ = make_app(["Hmm, the user wants… let me look.\n</think>\n\nA login page."])
+    assert await Vision(app.models, role="chat").look("abc", "?") == "A login page."
+
+
 # ---------------------------------------------------------------- one approval per task
 
 

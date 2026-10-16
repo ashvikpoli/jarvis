@@ -48,6 +48,8 @@ Compare with EXISTING memories (listed with ids):
 
 Return JSON only. If there is nothing to remember, return {"operations": []}."""
 
+# Every field is required: with constrained decoding, small models write only the
+# required fields — with just "op" required they returned {"op": "add"} and no text.
 EXTRACT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -57,17 +59,20 @@ EXTRACT_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "op": {"type": "string", "enum": ["add", "update", "delete"]},
-                    "id": {"type": ["integer", "null"]},
                     "text": {"type": "string"},
                     "category": {"type": "string", "enum": list(CATEGORIES)},
                     "subject": {"type": ["string", "null"]},
+                    "id": {"type": ["integer", "null"]},
                 },
-                "required": ["op"],
+                "required": ["op", "text", "category", "subject", "id"],
+                "additionalProperties": False,
             },
         }
     },
     "required": ["operations"],
+    "additionalProperties": False,
 }
+EXTRACT_OPTIONS = {"temperature": 0, "think": False, "num_predict": 600}  # no endless loops
 
 _PERSONAL = re.compile(
     r"\b(i|i'm|im|i've|ive|i'd|i'll|my|me|mine|myself|we|we're|our|ours|us|remember|forget)\b",
@@ -93,6 +98,8 @@ class MemoryExtractor:
         self.models = models
         self.service = service
         self.role = role
+        self.last_raw = ""
+        self.last_ops: list[dict] = []
 
     async def extract(
         self,
@@ -101,6 +108,7 @@ class MemoryExtractor:
         conversation_id: int | None = None,
         *,
         force: bool = False,
+        dry_run: bool = False,
     ) -> list[Change]:
         if not self.service.enabled or (not force and not worth_checking(user_text)):
             return []
@@ -128,7 +136,11 @@ class MemoryExtractor:
             + f"USER's latest message:\n{user_text}"
         )
         raw = await self._complete([Message.system(EXTRACT_SYSTEM), Message.user(prompt)])
+        self.last_raw = raw  # for `jarvis memory try`
         ops = _parse_ops(raw)
+        if dry_run:
+            self.last_ops = ops
+            return []
         changes: list[Change] = []
         for op in ops:
             kind, text, mid = op.get("op"), (op.get("text") or "").strip(), op.get("id")
@@ -138,6 +150,8 @@ class MemoryExtractor:
                 subject = subject[:1].upper() + subject[1:]  # "rahul" → "Rahul"
             if category in ("profile", "preference"):
                 subject = None  # facts about the user themselves
+            if kind in ("add", "update") and not text:
+                log.warning("extractor gave %s without text: %r", kind, op)
             if kind == "add" and text:
                 if _SECRETISH.search(text):
                     continue
@@ -164,7 +178,7 @@ class MemoryExtractor:
 
     async def _complete(self, messages: list[Message]) -> str:
         parts: list[str] = []
-        opts = {"format": EXTRACT_SCHEMA, "temperature": 0, "think": False}
+        opts = {"format": EXTRACT_SCHEMA, **EXTRACT_OPTIONS}
         async for chunk in self.models.stream_chat(messages, self.role, options=opts):
             parts.append(chunk.text)
         return "".join(parts)

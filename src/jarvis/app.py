@@ -51,7 +51,7 @@ from jarvis.vault.sync import Report, VaultSync, VaultWorker
 log = logging.getLogger(__name__)
 
 DEFAULT_EMBED_MODEL = "ollama:qwen3-embedding:0.6b"
-DEFAULT_VISION_MODEL = "ollama:qwen3-vl:8b"
+DEFAULT_VISION_MODEL = "ollama:qwen3-vl:8b-instruct"  # plain :8b is the slow thinking one
 SUBJECTS_DONE = "meta:subjects-assigned"
 
 
