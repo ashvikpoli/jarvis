@@ -2,7 +2,7 @@
 
 ## 1. Goal
 
-Talk to Jarvis and hear it answer. **Tap Right Ctrl** (anywhere in Windows — no
+Talk to Jarvis and hear it answer. **Tap Left Ctrl** (anywhere in Windows — no
 need to focus the terminal), say what you want, and pause. Jarvis stops listening
 on its own, works out what you said, answers in a British voice, and can still use
 every tool from Phase 2 and the memory from Phase 3. Tap again while it's talking
@@ -13,7 +13,7 @@ Everything runs on your PC. Nothing is sent anywhere.
 ## 2. How a turn flows
 
 ```
- tap Right Ctrl ─► 🔊 "listening" beep
+ tap Left Ctrl ─► 🔊 "listening" beep
    │
    ├─ Microphone (always open, 16 kHz) ─► Silero VAD, every 32 ms: speech?
    │     starts when you start talking · stops after 0.7 s of quiet
@@ -38,7 +38,7 @@ your speech (after the 0.7 s pause) to Jarvis's first sound. Target: < 1 s.
 
 | | Choice | Why |
 |---|---|---|
-| Talk key | **tap** Right Ctrl, auto-stop on silence | your pick; a clean tap only — Right Ctrl + C etc. don't trigger |
+| Talk key | **tap** Left Ctrl, auto-stop on silence | your pick; a clean tap only — Ctrl + C or Ctrl + click etc. don't trigger |
 | Hearing | faster-whisper `distil-large-v3.5`, English | fast, accurate, ~1.5 GB VRAM; `large-v3-turbo` if you ever want other languages |
 | GPU | float16 (CTranslate2 disables int8 on RTX 50) | CUDA libraries come from pip (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, ~1.2 GB); falls back to CPU automatically |
 | Silence detection | Silero VAD v6 (ships inside faster-whisper, run with onnxruntime) | no PyTorch needed |
@@ -113,10 +113,10 @@ speech detected by the real VAD.
 On your PC:
 - [ ] `uv sync`, `uv run jarvis voice setup` → "Speech recognition: … on cuda (float16)"
 - [ ] `uv run jarvis voice test` → hear the sentence; round trip ≥ 80 %; mic hears you
-- [ ] `uv run jarvis voice` → greeting; tap Right Ctrl, "what time is it?" → spoken answer
+- [ ] `uv run jarvis voice` → greeting; tap Left Ctrl, "what time is it?" → spoken answer
 - [ ] "Open Spotify" → opens; "remind me in 2 minutes to stretch" → reminder spoken + toast
 - [ ] "Create a file test.txt on my desktop" → asks out loud → "yes" → created
-- [ ] Ask for something long, tap Right Ctrl mid-answer → stops, listens
-- [ ] Right Ctrl + C in another app does **not** start listening
+- [ ] Ask for something long, tap Left Ctrl mid-answer → stops, listens
+- [ ] Ctrl + C or Ctrl + click in another app does **not** start listening
 - [ ] "spoke … ms after you stopped" mostly under 1000 ms
 - [ ] `jarvis doctor` still shows the chat model 100 % on GPU while voice is running

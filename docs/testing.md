@@ -102,10 +102,10 @@ Once: `uv run jarvis voice setup` (downloads ~1.9 GB the first time).
 | V2 | `uv run jarvis voice test` | You hear Jarvis say the test sentence; round trip ≥ 80 %; then say something → it's transcribed correctly. |
 | V3 | `uv run jarvis voice voices --play` | Each voice introduces itself. |
 | V4 | `uv run jarvis voice` | "Good …, Jarvis is online." spoken. |
-| V5 | Tap **Right Ctrl**, "What time is it?" and pause | Beep, `you › What time is it?`, spoken answer with the right time. Stats line: *spoke … ms after you stopped* (target < 1000). |
-| V6 | Click into another window (browser), tap Right Ctrl, "Open Spotify" | Works without the terminal focused; Spotify opens. |
-| V7 | In that other window press **Right Ctrl + C** | Does **not** start listening. |
-| V8 | "Explain how a jet engine works in detail", then tap Right Ctrl mid-answer and say "never mind" | Stops talking at once (⏹ interrupted), listens, answers "never mind". |
+| V5 | Tap **Left Ctrl**, "What time is it?" and pause | Beep, `you › What time is it?`, spoken answer with the right time. Stats line: *spoke … ms after you stopped* (target < 1000). |
+| V6 | Click into another window (browser), tap Left Ctrl, "Open Spotify" | Works without the terminal focused; Spotify opens. |
+| V7 | In that other window press **Ctrl + C or Ctrl + click** | Does **not** start listening. |
+| V8 | "Explain how a jet engine works in detail", then tap Left Ctrl mid-answer and say "never mind" | Stops talking at once (⏹ interrupted), listens, answers "never mind". |
 | V9 | Press Enter while Jarvis is talking | Stops talking. |
 | V10 | "Create a file called voice-test.txt on my desktop saying hello" | **Asks out loud**; say "yes" → file created. Repeat with "no" → not created. |
 | V11 | "Remind me in 1 minute to drink water" and wait | Reminder is **spoken** + Windows notification. |

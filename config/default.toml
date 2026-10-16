@@ -88,7 +88,7 @@ destructive = "ask"        # overwrite / delete — always asks, "always allow" 
 
 [voice]
 # `jarvis voice`: tap the hotkey, speak, and Jarvis answers out loud.
-hotkey = "ctrl_r"          # tap Right Ctrl on its own (shortcuts like Right Ctrl+C don't count).
+hotkey = "ctrl_l"          # tap Left Ctrl on its own (Ctrl+C, Ctrl+click etc. don't count).
                            # Or a combo: "<ctrl>+<alt>+j". Key names: pynput's Key.* (f9, pause, …)
 # Hearing — faster-whisper on the GPU (falls back to the CPU if CUDA isn't working)
 stt_model = "distil-large-v3.5"   # English, fast & accurate (~1.5 GB VRAM). Multilingual: "large-v3-turbo"

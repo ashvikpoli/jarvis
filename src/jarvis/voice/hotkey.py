@@ -1,8 +1,9 @@
 """The push-to-talk key: works anywhere in Windows, even when the terminal isn't focused.
 
 Two kinds of hotkey:
-- a single key TAPPED on its own, e.g. "ctrl_r" (Right Ctrl). Holding it as part
-  of a shortcut (Right Ctrl + C) does NOT trigger — only a clean tap does.
+- a single key TAPPED on its own, e.g. "ctrl_l" (Left Ctrl). Holding it as part
+  of a shortcut (Ctrl + C) or while clicking/scrolling (Ctrl + click) does NOT
+  trigger — only a clean tap does.
 - a combination, e.g. "<ctrl>+<alt>+j", triggered when pressed.
 """
 
@@ -21,6 +22,7 @@ TAP_MAX_S = 0.6  # a longer press isn't a tap (you were probably doing something
 def describe(spec: str) -> str:
     names = {
         "ctrl_r": "Right Ctrl",
+        "ctrl": "Ctrl",
         "ctrl_l": "Left Ctrl",
         "alt_r": "Right Alt",
         "alt_gr": "AltGr",
@@ -53,6 +55,11 @@ class TapDetector:
                 self._clean = True
         elif self._down_at is not None:
             self._clean = False  # another key while held: it's a shortcut, not a tap
+
+    def other(self) -> None:
+        """A mouse click/scroll while held (Ctrl + click): not a tap either."""
+        if self._down_at is not None:
+            self._clean = False
 
     def up(self, key) -> bool:
         if key != self.target or self._down_at is None:
@@ -111,6 +118,16 @@ class Hotkey:
                     self._fire()
 
             listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+            try:  # Ctrl + click / Ctrl + scroll mustn't count as a tap
+                from pynput import mouse
+
+                self._mouse = mouse.Listener(
+                    on_click=lambda *_a: tap.other(), on_scroll=lambda *_a: tap.other()
+                )
+                self._mouse.daemon = True
+                self._mouse.start()
+            except Exception:
+                log.debug("mouse listener unavailable", exc_info=True)
         listener.daemon = True
         listener.start()
         self._listener = listener
@@ -119,3 +136,6 @@ class Hotkey:
         if self._listener is not None:
             self._listener.stop()
             self._listener = None
+        if getattr(self, "_mouse", None) is not None:
+            self._mouse.stop()
+            self._mouse = None

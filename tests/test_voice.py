@@ -267,7 +267,10 @@ def test_tap_detector():
     now[0] = 2.0  # held too long
     assert tap.up("ctrl_r") is False
     assert tap.up("x") is False
-    assert describe("ctrl_r") == "Right Ctrl" and describe("f9") == "F9"
+    tap.down("ctrl_r")
+    tap.other()  # Ctrl + click (e.g. open a link in a new tab) isn't a tap
+    assert tap.up("ctrl_r") is False
+    assert describe("ctrl_l") == "Left Ctrl" and describe("f9") == "F9"
     assert describe("<ctrl>+<alt>+j") == "Ctrl+Alt+J"
 
 
@@ -297,7 +300,7 @@ def test_word_accuracy():
 
 def test_voice_settings_and_whisper_absent(tmp_path):
     settings = load_settings(Path(__file__).resolve().parents[1] / "config")
-    assert settings.voice.hotkey == "ctrl_r" and settings.voice.tts_voice == "bm_george"
+    assert settings.voice.hotkey == "ctrl_l" and settings.voice.tts_voice == "bm_george"
     settings.app.data_dir = tmp_path
     assert vc.whisper_downloaded(settings) is False
 

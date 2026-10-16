@@ -138,7 +138,7 @@ class MemorySettings(BaseModel):
 
 
 class VoiceSettings(BaseModel):
-    hotkey: str = "ctrl_r"  # tap Right Ctrl to talk; or a combo like "<ctrl>+<alt>+j"
+    hotkey: str = "ctrl_l"  # tap Left Ctrl to talk; or a combo like "<ctrl>+<alt>+j"
     # speech-to-text (faster-whisper)
     stt_model: str = "distil-large-v3.5"  # English; "large-v3-turbo" = multilingual
     stt_device: str = "auto"  # auto (GPU if it works, else CPU) | cuda | cpu

@@ -5,7 +5,7 @@ A local-first personal AI assistant for Windows, built layer by layer.
 **Current phase: 4.5 — Obsidian second brain.** Everything Jarvis knows (memory,
 notes, reminders, conversations, a daily journal) lives as Markdown pages in your
 Obsidian vault — edit them and Jarvis learns from your edits; it also searches the
-notes you write. Phase 4: tap **Right Ctrl**, speak, and Jarvis answers out loud in a
+notes you write. Phase 4: tap **Left Ctrl**, speak, and Jarvis answers out loud in a
 British voice — everything local (faster-whisper on the GPU, Kokoro TTS).
 Built on Phase 3's long-term memory, Phase 2's tools (files, apps, notes, reminders —
 every action permission-checked and audited) and Phase 1's saved conversations and evals.
@@ -35,7 +35,7 @@ We run natively on Windows because later phases control the Windows desktop.
    uv run jarvis chat
    uv run jarvis voice setup # voice models: ~350 MB voice + ~1.5 GB speech recognition
    uv run jarvis voice test  # hear Jarvis, check the mic
-   uv run jarvis voice       # talk: tap Right Ctrl, speak, pause
+   uv run jarvis voice       # talk: tap Left Ctrl, speak, pause
    ```
 
 ## Usage
@@ -104,7 +104,7 @@ Your vault (`Documents\obsidian_notes`) stays in sync while Jarvis runs:
 
 ## Voice (Phase 4)
 
-`uv run jarvis voice`, then **tap Right Ctrl** (from any app — the terminal doesn't
+`uv run jarvis voice`, then **tap Left Ctrl** (from any app — the terminal doesn't
 need focus), speak, and pause: Jarvis stops listening by itself after ~0.7 s of quiet
 and answers out loud. **Tap again while it's talking** to cut it off and speak;
 press **Enter** to just stop it. Typing still works and is answered aloud.
@@ -114,7 +114,7 @@ press **Enter** to just stop it. Typing still works and is answered aloud.
   or type `y` / `n` / `a`.
 - After each turn: `heard in 180 ms · answer in 40 ms · spoke 650 ms after you
   stopped` — the last number is the delay you feel.
-- Only a clean tap counts: Right Ctrl + C in another app doesn't start listening.
+- Only a clean tap counts: Ctrl + C or Ctrl + click in another app doesn't start listening.
   Change the key in `[voice] hotkey` (e.g. `"f9"` or `"<ctrl>+<alt>+j"`).
 - Voice: `bm_george` (British male). Hear the others with `jarvis voice voices --play`;
   switch with `/voice bm_lewis` or `[voice] tts_voice`.
