@@ -76,15 +76,56 @@ def _device(spec: str | int | None) -> int | str | None:
     return spec  # a (part of a) name — resolved by find_device() when the stream opens
 
 
+NO_MIC_HELP = (
+    "Windows has no microphone set as the default. Plug one in, or pick one in Settings → "
+    "System → Sound → Input — or set [voice] input_device (see: jarvis voice devices)."
+)
+_NOT_A_MIC = ("stereo mix", "loopback", "what u hear", "wave out", "sound mapper",
+              "primary sound capture", "virtual")  # fmt: skip
+
+
+def _auto_device(sd, kind: str) -> int:
+    """No Windows default: pick the most likely real microphone / speaker ourselves."""
+    channels = "max_input_channels" if kind == "input" else "max_output_channels"
+    apis = [a["name"] for a in sd.query_hostapis()]
+    order = {"MME": 0, "Windows WASAPI": 1, "Windows DirectSound": 2}
+    best = None
+    for i, d in enumerate(sd.query_devices()):
+        name = d["name"].lower()
+        if d[channels] <= 0 or any(w in name for w in _NOT_A_MIC):
+            continue
+        likely = any(
+            w in name
+            for w in (
+                ("microphone", "mic", "headset", "array", "webcam")
+                if kind == "input"
+                else ("speaker", "headphone", "headset", "realtek")
+            )
+        )
+        rank = (not likely, order.get(apis[d["hostapi"]], 9), i)
+        if best is None or rank < best[0]:
+            best = (rank, i)
+    if best is None:
+        raise AudioError(NO_MIC_HELP if kind == "input" else "No speakers or headphones found.")
+    log.info("no default %s device; using #%s %s", kind, best[1], sd.query_devices(best[1])["name"])
+    return best[1]
+
+
 def find_device(spec: int | str | None, kind: str) -> int | None:
-    """Device index for a number or part of a name.
+    """Device index for a number or part of a name (None = Windows default).
 
     Windows lists every device once per audio API (MME, DirectSound, WASAPI…), so a
-    bare name is ambiguous for PortAudio; prefer the default API's entry.
+    bare name is ambiguous for PortAudio; prefer the default API's entry. When
+    Windows has no default device (PortAudio reports -1), pick a real one.
     """
-    if spec is None or isinstance(spec, int):
+    if isinstance(spec, int):
         return spec
     sd = _sd()
+    if spec is None:
+        default = sd.default.device[0 if kind == "input" else 1]
+        if default is not None and default >= 0:
+            return None
+        return _auto_device(sd, kind)
     want = spec.lower()
     channels = "max_input_channels" if kind == "input" else "max_output_channels"
     default_api = sd.default.hostapi
@@ -121,11 +162,14 @@ def list_devices() -> list[dict[str, Any]]:
 
 
 def default_device_names() -> tuple[str | None, str | None]:
+    """What Jarvis will use: Windows' default, or the device it picks when there's none."""
     sd = _sd()
     names = []
     for kind in ("input", "output"):
         try:
-            names.append(sd.query_devices(kind=kind)["name"])
+            idx = find_device(None, kind)
+            info = sd.query_devices(kind=kind) if idx is None else sd.query_devices(idx)
+            names.append(info["name"] + ("" if idx is None else " (auto — no Windows default)"))
         except Exception:
             names.append(None)
     return names[0], names[1]
@@ -170,13 +214,15 @@ class Microphone:
             self._stream = self._open(sd, SAMPLE_RATE, FRAME)
         except Exception as e:  # some devices only do their native rate
             log.info("mic can't open at 16 kHz (%s); using its native rate", e)
-            info = sd.query_devices(self.device, kind="input")
-            self._rate = int(info["default_samplerate"])
-            block = round(FRAME * self._rate / SAMPLE_RATE)
             try:
+                info = sd.query_devices(self.device, kind="input")
+                self._rate = int(info["default_samplerate"])
+                block = round(FRAME * self._rate / SAMPLE_RATE)
                 self._stream = self._open(sd, self._rate, block)
             except Exception as e2:
-                raise AudioError(f"couldn't open the microphone: {e2}") from e2
+                self._stream = None
+                hint = NO_MIC_HELP if "-1" in str(e2) else "see: jarvis voice devices"
+                raise AudioError(f"couldn't open the microphone ({e2}). {hint}") from e2
         self._stream.start()
 
     def _open(self, sd, rate: int, block: int):
@@ -338,7 +384,10 @@ class Speaker:
         try:
             self._stream = self._open(sd, self.rate)
         except Exception as e:  # e.g. WASAPI only accepts the device's own mix rate
-            info = sd.query_devices(self.device, kind="output")
+            try:
+                info = sd.query_devices(self.device, kind="output")
+            except Exception as e2:
+                raise AudioError(f"couldn't open the speakers ({e2}).") from e2
             native = int(info["default_samplerate"])
             if native == self.rate:
                 raise AudioError(f"couldn't open the speakers: {e}") from e

@@ -663,3 +663,45 @@ def test_whisper_falls_back_to_cpu(monkeypatch):
     assert result.text == "Open Spotify." and stt.beam_size == 1
     assert stt.model.kw["hotwords"] == "Jarvis" and stt.model.kw["language"] == "en"
     assert stt.describe() == "distil-large-v3.5 on cpu (int8)"
+
+
+class FakeSD:
+    """Just enough of sounddevice for device selection."""
+
+    def __init__(self, default=(-1, 1), devices=None):
+        self.default = type("D", (), {"device": default, "hostapi": 0})()
+        self._devices = devices or []
+
+    def query_hostapis(self, i=None):
+        apis = [{"name": "MME"}, {"name": "Windows WASAPI"}]
+        return apis if i is None else apis[i]
+
+    def query_devices(self, i=None, kind=None):
+        return self._devices if i is None else self._devices[i]
+
+
+def _dev(name, ins, outs, api=0):
+    return {"name": name, "max_input_channels": ins, "max_output_channels": outs,
+            "hostapi": api, "default_samplerate": 48000.0}  # fmt: skip
+
+
+def test_no_windows_default_mic_picks_a_real_one(monkeypatch):
+    from jarvis.voice import audio
+
+    devs = [
+        _dev("Microsoft Sound Mapper - Input", 2, 0),
+        _dev("Stereo Mix (Realtek Audio)", 2, 0),
+        _dev("Speakers (Realtek Audio)", 0, 2),
+        _dev("Microphone (USB Audio Device)", 1, 0, api=1),
+        _dev("Microphone (USB Audio Device)", 1, 0, api=0),
+    ]
+    monkeypatch.setattr(audio, "_sd", lambda: FakeSD((-1, 2), devs))
+    assert audio.find_device(None, "input") == 4  # a real mic, MME first
+    assert audio.find_device(None, "output") is None  # Windows has a default speaker
+    assert audio.default_device_names()[0].startswith("Microphone (USB Audio Device) (auto")
+
+    monkeypatch.setattr(audio, "_sd", lambda: FakeSD((-1, 2), devs[:3]))
+    with pytest.raises(audio.AudioError, match="no microphone set as the default"):
+        audio.find_device(None, "input")
+    monkeypatch.setattr(audio, "_sd", lambda: FakeSD((3, 2), devs))
+    assert audio.find_device(None, "input") is None
