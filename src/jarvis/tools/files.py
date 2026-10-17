@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -426,14 +427,64 @@ class FilesOpen(_FileTool):
         return f"open {args.path}"
 
     async def run(self, args: OpenArgs, ctx: ToolContext):
-        p = safe_path(args.path, ctx, must_exist=True)
+        guessed = ""
+        try:
+            p = safe_path(args.path, ctx, must_exist=True)
+        except ToolError as missing:
+            # "Open my Q3 report" → the model guesses "Documents/Q3 report"; the file is
+            # report-q3.txt. Find it by the words in the name instead of giving up.
+            found = _find_by_words(args.path, ctx)
+            if len(found) != 1:
+                if not found:
+                    raise
+                listing = "\n".join(f"- {f}" for f in found[:5])
+                raise ToolError(
+                    f"{missing} Files that match: \n{listing}\nAsk which one, or open the "
+                    "right one with files_open."
+                ) from None
+            p, guessed = safe_path(str(found[0]), ctx, must_exist=True), args.path
         if p.is_file() and p.suffix.lower() in EXECUTABLE_SUFFIXES:
             raise ToolError(
                 f"{p.name} is a program or script; I don't run those by opening files. "
                 "(To start an installed app, use apps_open.)"
             )
         ctx.launcher.open(str(p))
-        return f"Opened {p}" + (" in File Explorer." if p.is_dir() else ".")
+        done = f"Opened {p}" + (" in File Explorer." if p.is_dir() else ".")
+        return done + (f" (No “{guessed}” — this was the only match.)" if guessed else "")
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in re.split(r"[^a-z0-9]+", text.lower()) if w]
+
+
+def _find_by_words(raw: str, ctx: ToolContext, limit: int = 6) -> list[Path]:
+    """Files in the user's folders whose name contains every word of the name asked for."""
+    name = re.split(r"[\\/]", raw.strip().strip("\"'"))[-1]
+    stem = name.rsplit(".", 1)[0] if "." in name[1:] else name
+    want = [w for w in _words(stem) if w not in {"my", "the", "a", "file", "folder"}]
+    if not want:
+        return []
+    hits: list[Path] = []
+    visited = 0
+    for root in ctx.file_roots:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if d not in SKIP_DIRS
+                and not d.startswith(".")
+                and not _under(Path(dirpath, d), ctx.files.no_access)
+            ]
+            for fn in filenames:
+                visited += 1
+                have = _words(fn)
+                if all(any(h.startswith(w) for h in have) for w in want):
+                    hits.append(Path(dirpath) / fn)
+                    if len(hits) >= limit:
+                        return hits
+            if visited > MAX_SEARCH_VISITS:
+                return hits
+    return hits
 
 
 FILE_TOOLS = [

@@ -148,9 +148,13 @@ class EvalRunner:
         except ProviderError as e:
             return CaseResult(case.id, case.category, False, ["error"], "", error=str(e))
         finally:
+            opened = list(getattr(box.ctx.launcher, "opened", []))
             box.close()
         reply = clean_reply("".join(parts))
         failures = run_checks(reply, case.checks, calls)
+        want = case.checks.opened_any
+        if want and not any(w.lower() in o.lower() for o in opened for w in want):
+            failures.append(f"opened {opened or 'nothing'}, wanted one of {want}")
         return CaseResult(
             case.id,
             case.category,

@@ -313,7 +313,7 @@ id = "tools-open-file"
 category = "tools"
 note = "'Open' a document = launch it in its app (files_open), not read it into chat."
 prompt = "Open my Q3 report."
-checks = { tools_called = ["files_open"], tool_args = { files_open = { path = "report-q3" } } }
+checks = { tools_called = ["files_open"], opened_any = ["report-q3"] }
 
 [[case]]
 id = "tools-write-file"

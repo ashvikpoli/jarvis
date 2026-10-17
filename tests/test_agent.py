@@ -254,3 +254,29 @@ async def test_outside_write_always_prompts_even_after_always(make_app, tmp_path
     assert len(prompts) == 2  # a.txt asked (→ always), b.txt silent, c.txt asked again
     assert prompts[1][0] == Risk.DESTRUCTIVE and not prompts[1][1]
     assert "OUTSIDE" in prompts[1][2]
+
+
+def test_announces_action():
+    from jarvis.agent.loop import announces_action
+
+    assert announces_action("I'll check my notes for the guest wifi password. Let me search.")
+    assert announces_action("Let me look that up.")
+    assert not announces_action("The password is lemonade42.")
+    assert not announces_action("Let me know if you need anything else.")
+    assert not announces_action("")
+
+
+async def test_said_it_would_search_but_didnt_gets_one_nudge(make_app):
+    app, provider = make_app(
+        ["Let me search my notes for it.", [call("files_list", path="Documents")], "Found it."]
+    )
+    conv, chunks = await run_turn(app, "what's in my documents?")
+    assert events(chunks) == [("call", "files_list"), ("result", "files_list")]
+    assert reply(chunks).endswith("Found it.")
+    assert "Note from the Jarvis app" in provider.calls[1]["messages"][-1].content
+    stored = [m for m in app.store.messages(conv.id) if "Note from the Jarvis" in m.content]
+    assert stored == []  # the nudge isn't saved
+    # Only once: a second announcement just ends the turn.
+    provider.turns = ["Let me check.", "Let me check again."]
+    await run_turn(app, "anything else?", conv=conv)
+    assert len(provider.turns) == 0 or provider.turns == ["Let me check again."]

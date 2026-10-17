@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import aclosing
@@ -44,6 +45,23 @@ def format_result(output: Any) -> str:
     if len(text) > MAX_RESULT_CHARS:
         text = text[:MAX_RESULT_CHARS] + f"\n… (truncated, {len(text)} chars total)"
     return text
+
+
+# A reply that only announces an action ("Let me check my notes.") without calling a tool.
+_ANNOUNCE = re.compile(
+    r"\b(let me|i'll|i will|i'm going to|i am going to|allow me to)\s+(now\s+)?"
+    r"(search|check|look|find|open|see|try|pull up|get|fetch|read|take a look|scan|go)\b",
+    re.IGNORECASE,
+)
+NUDGE = (
+    "(Note from the Jarvis app, not the user: you said you would do that but didn't call "
+    "a tool. Call the right tool now — don't describe it. If no tool fits, just answer.)"
+)
+
+
+def announces_action(text: str) -> bool:
+    text = text.strip()
+    return bool(text) and len(text.split()) <= 60 and bool(_ANNOUNCE.search(text))
 
 
 class AgentLoop:
@@ -103,6 +121,7 @@ class AgentLoop:
         started = time.perf_counter()
         first_usage: Usage | None = None
         completed = False
+        nudged = False
 
         for _step in range(self.max_steps):
             text: list[str] = []
@@ -141,6 +160,12 @@ class AgentLoop:
             assistant = Message.assistant("".join(text), calls)
             on_message(assistant, thinking="".join(thinking), usage=usage)
             msgs.append(assistant)
+            if not calls and specs and not nudged and announces_action(assistant.content):
+                # "Let me search for it." — and then it stopped. Hold it to its word, once.
+                nudged = True
+                msgs.append(Message.user(NUDGE))
+                yield StreamChunk(text="\n")
+                continue
             if not calls:
                 completed = True
                 break

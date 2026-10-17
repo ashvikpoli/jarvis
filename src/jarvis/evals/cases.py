@@ -33,6 +33,7 @@ class Checks(BaseModel):
     no_tools: bool = False  # answered without calling any tool
     # {"reminders_set": {"text": "stretch"}}: some call's arg contains the substring
     tool_args: dict[str, dict[str, str]] = Field(default_factory=dict)
+    opened_any: list[str] = Field(default_factory=list)  # what really got opened (launcher)
     # memory learning (kind = "extract")
     memories_any: list[str] = Field(default_factory=list)  # a learned memory contains one
     memories_not: list[str] = Field(default_factory=list)  # no learned memory contains these

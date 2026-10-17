@@ -494,3 +494,17 @@ def test_jarvis_root_and_self_protection(make_app):
     assert app.settings.config_dir.resolve() in ctx.files.no_write
     assert app.settings.app.data_dir.resolve() in ctx.files.no_write
     assert ctx.files.read_anywhere and ctx.files.outside_writes == "ask"
+
+
+async def test_files_open_finds_the_file_when_the_guess_is_wrong(zoned, roots):
+    from jarvis.tools.files import FilesOpen, OpenArgs
+
+    (roots[0] / "report-q3.txt").write_text("Q3")
+    out = await FilesOpen().run(OpenArgs(path="Documents/Q3 report"), zoned)
+    assert zoned.launcher.opened[-1] == str(roots[0] / "report-q3.txt")
+    assert "only match" in out
+    (roots[1] / "q3 report old.txt").write_text("old")
+    with pytest.raises(ToolError, match="Files that match"):  # two → ask, don't guess
+        await FilesOpen().run(OpenArgs(path="Q3 report"), zoned)
+    with pytest.raises(ToolError):
+        await FilesOpen().run(OpenArgs(path="holiday photos"), zoned)
